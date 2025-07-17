@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Zain's Art Portfolio</title>
+<style>
+body {
+background-color: #f0f0f0;
+text-align: center;
+font-family: Arial, sans-serif;
+padding: 40px;
+}
+h1 {
+color: #3b3b98;
+}
+p {
+font-size: 18px;
+color: #444;
+}
+</style>
+</head>
+<body>
+<h1>Welcome to Zain's Art World</h1>
+<p>This is my personal website to show my art and designs!</p>
+</body>
+</html>
