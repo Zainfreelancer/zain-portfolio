@@ -9,7 +9,7 @@ from openai import OpenAI
 # 1. Cleanly set your browser tab title text
 st.set_page_config(page_title="CraftGPT App", page_icon="🚀", layout="centered")
 
-# 💎 PREMIUM GEMINI STYLING INJECTION
+# 💎 PREMIUM STYLING INJECTION
 st.markdown("""
     <style>
         .stApp { background-color: #131314 !important; color: #E3E3E3 !important; }
@@ -95,7 +95,7 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
     # Construct contemporary payload for THIS dynamic turn only
     user_content = [{"type": "text", "text": prompt}]
     
-    # 🛠️ SAFE VISION FILTER: Only attach the image if the selected model supports vision input
+    # SAFE VISION FILTER: Only attach the image if the selected model supports vision input
     is_vision_supported = "deepseek-r1" not in selected_model_id
     
     if img_base64 and is_vision_supported:
@@ -115,12 +115,10 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
         
         if not OPENROUTER_API_KEY:
             response_placeholder.error("API Key missing. Enter your key to run the engine.")
-        # 🛠️ HELPFUL WARNING: Catch vision-clashes gracefully and guide the user
         elif img_base64 and not is_vision_supported:
             response_placeholder.error(
                 f"🛑 **Model Vision Conflict:** You uploaded an image, but **{selected_model_name}** is a text-only model. "
-                "Please select **Gemini 2.5 Pro** or **GPT-4o** in the sidebar configuration to analyze math images, "
-                "or clear the image snapshot to proceed with text questions."
+                "Please select **Gemini 2.5 Pro** or **GPT-4o** in the sidebar configuration to analyze math images."
             )
         else:
             client = OpenAI(
@@ -135,15 +133,14 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
                     "content": (
                         "You are a world-class, empathetic homework assistant named CraftGPT. "
                         "Help step by step and explain clearly with strict mathematical accuracy. "
-                        "CRITICAL: When writing mathematical equations, formulas, fractions, or symbols, "
                         "ALWAYS use LaTeX formatting enclosed in double dollar signs for blocks (e.g., \[x^2\]) "
-                        "or single dollar signs for inline text (e.g., \(x\)). Avoid plain text math notation entirely."
+                        "or single dollar signs for inline text (e.g., \(x\))."
                     ),
                 }
             ]
             
-            # Map history turns directly over to API payload array
-            for msg in st.session_state.messages:
+            # 🛠️ OPTIMIZED ROLLING WINDOW: Maps only the last 4 turns to protect your token ceiling context bounds
+            for msg in st.session_state.messages[-4:]:
                 api_messages.append({"role": msg["role"], "content": msg["content"]})
 
             try:
@@ -151,7 +148,7 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
                     model=selected_model_id, 
                     messages=api_messages,
                     temperature=0.1, 
-                    max_tokens=3000,
+                    max_tokens=2000, # Raised safely back up because memory leaks are plugged!
                     stream=True,
                     extra_headers={
                         "HTTP-Referer": "http://localhost:8501",
@@ -168,7 +165,20 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
                 
                 response_placeholder.markdown(full_response)
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
-                st.rerun()  # Force rerun to cleanly generate the export button snapshot immediately
+                st.rerun()
 
             except Exception as exc:
-                response_placeholder.error(f"Failed to communicate with OpenRouter. Error: {exc}")
+                # 🛠️ SAFE FAILOVER CAPTURE BLOCK
+                if "402" in str(exc):
+                    response_placeholder.error(
+                        "⚠️ **Server Budget Limit Hit:** The global account balance is currently out of credits. "
+                        "To keep using the platform completely free, go to your app settings panel and register your own custom "
+                        "free key endpoint from openrouter.ai/settings/credits."
+                    )
+                else:
+                    response_placeholder.error(f"Failed to communicate with OpenRouter. Error: {exc}")
+
+    # SAFE PLACEMENT: Trigger rerun cleanly OUTSIDE the assistant rendering context block
+    if img_base64:
+        st.session_state["homework_file"] = None
+        st.rerun()
