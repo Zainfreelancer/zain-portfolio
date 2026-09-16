@@ -94,7 +94,11 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
     
     # Construct contemporary payload for THIS dynamic turn only
     user_content = [{"type": "text", "text": prompt}]
-    if img_base64:
+    
+    # 🛠️ SAFE VISION FILTER: Only attach the image if the selected model supports vision input
+    is_vision_supported = "deepseek-r1" not in selected_model_id
+    
+    if img_base64 and is_vision_supported:
         user_content.append({
             "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"},
@@ -111,6 +115,13 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
         
         if not OPENROUTER_API_KEY:
             response_placeholder.error("API Key missing. Enter your key to run the engine.")
+        # 🛠️ HELPFUL WARNING: Catch vision-clashes gracefully and guide the user
+        elif img_base64 and not is_vision_supported:
+            response_placeholder.error(
+                f"🛑 **Model Vision Conflict:** You uploaded an image, but **{selected_model_name}** is a text-only model. "
+                "Please select **Gemini 2.5 Pro** or **GPT-4o** in the sidebar configuration to analyze math images, "
+                "or clear the image snapshot to proceed with text questions."
+            )
         else:
             client = OpenAI(
                 base_url="https://openrouter.ai/api/v1",
@@ -125,8 +136,8 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
                         "You are a world-class, empathetic homework assistant named CraftGPT. "
                         "Help step by step and explain clearly with strict mathematical accuracy. "
                         "CRITICAL: When writing mathematical equations, formulas, fractions, or symbols, "
-                        "ALWAYS use LaTeX formatting enclosed in double dollar signs for blocks (e.g., $$x^2$$) "
-                        "or single dollar signs for inline text (e.g., $x$). Avoid plain text math notation entirely."
+                        "ALWAYS use LaTeX formatting enclosed in double dollar signs for blocks (e.g., \[x^2\]) "
+                        "or single dollar signs for inline text (e.g., \(x\)). Avoid plain text math notation entirely."
                     ),
                 }
             ]
@@ -161,8 +172,3 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
 
             except Exception as exc:
                 response_placeholder.error(f"Failed to communicate with OpenRouter. Error: {exc}")
-
-    # SAFE PLACEMENT: Trigger rerun cleanly OUTSIDE the assistant rendering context block
-    if img_base64:
-        st.session_state["homework_file"] = None
-        st.rerun()
