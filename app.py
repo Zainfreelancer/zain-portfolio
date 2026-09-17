@@ -1,15 +1,14 @@
 import os
 import io
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import streamlit as st
 from PIL import Image
 from openai import OpenAI
 import requests
 from supabase import create_client, Client
-from skyfield.api import load, wgs84
-from skyfield import almanac
+from astronomy import Observer, SearchRiseSet, Direction, Body
 
 # 1. Set browser tab layout parameters cleanly
 st.set_page_config(page_title="CraftGPT App", page_icon="🚀", layout="centered")
@@ -45,16 +44,6 @@ def init_supabase() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 supabase = init_supabase()
-
-# --- SKYFIELD EPHEMERIS (lazy-loaded) ---
-@st.cache_resource
-def load_ephemeris():
-    try:
-        ts = load.timescale()
-        eph = load('de440s.bsp')
-        return ts, eph
-    except Exception:
-        return None, None
 
 # --- AUTHENTICATION GATE ---
 if "user" not in st.session_state:
@@ -237,41 +226,35 @@ def get_astronomy(location: str = "Islamabad,PK") -> str:
     except Exception as e:
         return f"Astronomy lookup failed: {e}"
 
-# --- SKYFIELD PLANET RISE/SET HELPER ---
+# --- PLANET RISE/SET HELPER (astronomy-engine, no API key) ---
 def get_planet_riseset(planet_name: str) -> str:
-    """Compute precise planet rise/set times for Islamabad using Skyfield."""
+    """Compute precise planet rise/set times for Islamabad using astronomy-engine."""
     try:
-        ts, eph = load_ephemeris()
-        if not ts or not eph:
-            return "Skyfield ephemeris not available."
-        
-        islamabad = wgs84.latlon(33.6844, 73.0479)
+        # Islamabad coordinates
+        observer = Observer(33.6844, 73.0479, 0)
         
         planet_map = {
-            "mercury": eph['mercury'],
-            "venus": eph['venus'],
-            "mars": eph['mars'],
-            "jupiter": eph['jupiter barycenter'],
-            "saturn": eph['saturn barycenter'],
+            "mercury": Body.Mercury, "venus": Body.Venus, "mars": Body.Mars,
+            "jupiter": Body.Jupiter, "saturn": Body.Saturn,
         }
         key = planet_name.lower()
         if key not in planet_map:
             return f"Planet '{planet_name}' not supported."
-        planet = planet_map[key]
         
+        body = planet_map[key]
         now = datetime.utcnow()
-        t0 = ts.utc(now.year, now.month, now.day)
-        t1 = ts.utc(now.year, now.month, now.day + 1)
         
-        f = almanac.risings_and_settings(eph, planet, islamabad)
-        times, events = almanac.find_discrete(t0, t1, f)
+        # Search for rise and set times (with UTC times)
+        rise_time = SearchRiseSet(body, observer, Direction.Rise, now, 1)
+        set_time = SearchRiseSet(body, observer, Direction.Set, now, 1)
         
         out = [f"**{planet_name.capitalize()} rise/set for Islamabad on {now.strftime('%Y-%m-%d')} (UTC):**\n"]
-        if len(times) == 0:
+        if rise_time:
+            out.append(f"• Rise: {rise_time.utc_strftime('%H:%M')} UTC")
+        if set_time:
+            out.append(f"• Set: {set_time.utc_strftime('%H:%M')} UTC")
+        if not rise_time and not set_time:
             return f"No rise/set events found for {planet_name} today."
-        for ti, ei in zip(times, events):
-            label = "Rise" if ei == 1 else "Set"
-            out.append(f"• {label}: {ti.utc_strftime('%H:%M')} UTC")
         return "\n".join(out)
     except Exception as e:
         return f"Planet calculation failed: {e}"
