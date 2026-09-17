@@ -5,6 +5,7 @@ import base64
 import streamlit as st
 from PIL import Image
 from openai import OpenAI
+import requests
 
 # 1. Set browser tab layout parameters cleanly
 st.set_page_config(page_title="CraftGPT App", page_icon="🚀", layout="centered")
@@ -29,40 +30,85 @@ if "messages" not in st.session_state:
 # --- API KEY MANAGEMENT WITH MULTI-PROVIDER BACKEND ---
 GLOBAL_OPENROUTER_KEY = st.secrets.get("OPENROUTER_API_KEY") or os.getenv("OPENROUTER_API_KEY")
 GLOBAL_GROQ_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+TAVILY_API_KEY = st.secrets.get("TAVILY_API_KEY") or os.getenv("TAVILY_API_KEY")
+FIRECRAWL_API_KEY = st.secrets.get("FIRECRAWL_API_KEY") or os.getenv("FIRECRAWL_API_KEY")
+
+# --- TAVILY SEARCH HELPER ---
+def tavily_search(query: str) -> str:
+    if not TAVILY_API_KEY:
+        return "Tavily search unavailable (no API key)."
+    try:
+        response = requests.post(
+            "https://api.tavily.com/search",
+            headers={"Authorization": f"Bearer {TAVILY_API_KEY}", "Content-Type": "application/json"},
+            json={"query": query, "search_depth": "advanced", "max_results": 5, "include_answer": True},
+            timeout=15
+        )
+        response.raise_for_status()
+        data = response.json()
+        output = []
+        if data.get("answer"):
+            output.append(f"**Answer:** {data['answer']}\n")
+        for i, result in enumerate(data.get("results", [])[:5], 1):
+            output.append(f"{i}. **{result.get('title', 'No title')}**")
+            output.append(f"   {result.get('content', '')[:300]}...")
+            output.append(f"   Source: {result.get('url', '')}\n")
+        return "\n".join(output) if output else "No results found."
+    except Exception as e:
+        return f"Tavily search failed: {e}"
+
+# --- FIRECRAWL SEARCH HELPER ---
+def firecrawl_search(query: str) -> str:
+    if not FIRECRAWL_API_KEY:
+        return "Firecrawl search unavailable (no API key)."
+    try:
+        response = requests.post(
+            "https://api.firecrawl.dev/v1/search",
+            headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}", "Content-Type": "application/json"},
+            json={"query": query, "limit": 5},
+            timeout=20
+        )
+        response.raise_for_status()
+        data = response.json()
+        output = []
+        for i, result in enumerate(data.get("data", [])[:5], 1):
+            output.append(f"{i}. **{result.get('title', 'No title')}**")
+            desc = result.get('description') or result.get('markdown', '')
+            output.append(f"   {desc[:300]}...")
+            output.append(f"   Source: {result.get('url', '')}\n")
+        return "\n".join(output) if output else "No results found."
+    except Exception as e:
+        return f"Firecrawl search failed: {e}"
 
 # Sidebar Workspace Layout configuration panels
 with st.sidebar:
     st.header("⚙️ Configuration")
 
-    # 🌟 FREE MODEL SELECTOR MAPPING WITH DESCRIPTIONS
-    # Only verified-working free models as of Sept 2026
     model_mapping = {
         "🎯 Auto Free Router — Best for images, diagrams & general homework":
             {"id": "openrouter/free", "provider": "openrouter"},
-
         "🧠 Nemotron 3 Ultra — Deep math, long proofs & reasoning (1M context)":
             {"id": "nvidia/nemotron-3-ultra-550b-a55b:free", "provider": "openrouter"},
         "💻 Laguna S 2.1 — Coding, programming & debugging help":
             {"id": "poolside/laguna-s-2.1:free", "provider": "openrouter"},
         "⚡ Nemotron 3 Super — Fast answers, multi-agent workflows (1M context)":
             {"id": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter"},
-
         "⚡ Groq GPT OSS 120B — Fast backup for general chat & homework":
             {"id": "openai/gpt-oss-120b", "provider": "groq"},
     }
 
-    selected_model_name = st.selectbox(
-        "Choose AI Brain Model:",
-        options=list(model_mapping.keys()),
-        index=0
-    )
-
-    # Extract operational metadata for backend routing paths
+    selected_model_name = st.selectbox("Choose AI Brain Model:", options=list(model_mapping.keys()), index=0)
     selected_model_meta = model_mapping[selected_model_name]
     selected_model_id = selected_model_meta["id"]
     active_provider = selected_model_meta["provider"]
 
-    # Custom key input UI layout fallback fields
+    # Web search toggle
+    web_search_enabled = st.toggle(
+        "🌐 Enable Live Web Search",
+        value=True,
+        help="Uses YOUR Tavily + Firecrawl keys (not OpenRouter credits)."
+    )
+
     user_custom_key = st.text_input(
         f"🔑 Custom {active_provider.upper()} Key Override (Optional):",
         type="password",
@@ -103,7 +149,6 @@ for msg in st.session_state.messages:
                         st.image(img_url, caption="Uploaded Context Image", width=300)
         else:
             st.write(msg["content"])
-
             if msg["role"] == "assistant":
                 st.download_button(
                     label="📥 Download Solution Sheet",
@@ -118,7 +163,6 @@ img_base64 = None
 if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption="Uploaded Homework Image", use_container_width=True)
-
     buffered = io.BytesIO()
     image.save(buffered, format="JPEG")
     img_base64 = base64.b64encode(buffered.getvalue()).decode()
@@ -128,7 +172,6 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
 
     user_content = [{"type": "text", "text": prompt}]
 
-    # Only openrouter/free supports vision among our verified models
     vision_models = ["openrouter/free"]
     is_vision_supported = selected_model_id in vision_models
 
@@ -138,7 +181,6 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
             "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"},
         })
 
-    # Save immediately into persistent array tracking elements
     st.session_state.messages.append({"role": "user", "content": user_content})
 
     with st.chat_message("user", avatar="user"):
@@ -148,25 +190,30 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
         response_placeholder = st.empty()
 
         if not ACTIVE_API_KEY:
-            response_placeholder.error(f"API Key missing for {active_provider.upper()}. Configure your tokens inside your app settings dashboard panel.")
+            response_placeholder.error(f"API Key missing for {active_provider.upper()}.")
         elif img_base64 and not is_vision_supported:
             response_placeholder.error(
-                f"🛑 **Model Vision Conflict:** You uploaded an image, but **{selected_model_name}** is a text-only model profile. "
-                "Please toggle over to **Auto Free Router** in the sidebar configuration dropdown to analyze worksheet photos."
+                f"🛑 **Model Vision Conflict:** You uploaded an image, but **{selected_model_name}** is text-only. "
+                "Toggle to **Auto Free Router** to analyze worksheet photos."
             )
         else:
-            client = OpenAI(
-                base_url=BASE_URL,
-                api_key=ACTIVE_API_KEY,
-            )
+            # --- WEB SEARCH WITH YOUR TAVILY + FIRECRAWL KEYS ---
+            search_context = ""
+            if web_search_enabled:
+                with st.spinner("🔍 Searching the web..."):
+                    if TAVILY_API_KEY:
+                        search_context = tavily_search(prompt)
+                    if (not search_context or "failed" in search_context.lower() or "unavailable" in search_context.lower()) and FIRECRAWL_API_KEY:
+                        search_context = firecrawl_search(prompt)
 
-            # Raw string declaration to prevent escaping character anomalies
-            api_messages = [
-                {
-                    "role": "system",
-                    "content": r"You are a world-class, empathetic homework assistant named CraftGPT. Help step by step and explain clearly with strict mathematical accuracy. ALWAYS use LaTeX formatting enclosed in double dollar signs for blocks (e.g., \[x^2\]) or single dollar signs for inline text (e.g., x)."
-                }
-            ]
+            client = OpenAI(base_url=BASE_URL, api_key=ACTIVE_API_KEY)
+
+            system_prompt = r"""You are a world-class, empathetic homework assistant named CraftGPT. Help step by step and explain clearly with strict mathematical accuracy. ALWAYS use LaTeX formatting enclosed in double dollar signs for blocks (e.g., \[x^2\]) or single dollar signs for inline text (e.g., x)."""
+
+            if search_context and "unavailable" not in search_context.lower() and "failed" not in search_context.lower():
+                system_prompt += f"\n\nLive web search results for the user's query:\n\n{search_context}\n\nUse these results to inform your answer. Cite sources when appropriate."
+
+            api_messages = [{"role": "system", "content": system_prompt}]
 
             for msg in st.session_state.messages[-4:]:
                 api_messages.append({"role": msg["role"], "content": msg["content"]})
@@ -197,7 +244,6 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
                 response_placeholder.markdown(full_response)
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
 
-                # Clear visual file state trackers cleanly upon completed resolution pass
                 if img_base64:
                     st.session_state["homework_file"] = None
 
@@ -206,8 +252,7 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
             except Exception as exc:
                 if "402" in str(exc) or "credit" in str(exc).lower():
                     response_placeholder.error(
-                        f"⚠️ **{active_provider.upper()} Server Budget Limit:** Out of computational credits. "
-                        "Please pass a custom valid token string inside the configuration panel override field on the sidebar to reset the routing gateway."
+                        f"⚠️ **{active_provider.upper()} Budget Limit:** Out of credits."
                     )
                 else:
-                    response_placeholder.error(f"Communications tracking link broke down along the {active_provider.upper()} framework pipeline stack. Error message text: {exc}")
+                    response_placeholder.error(f"Pipeline error on {active_provider.upper()}: {exc}")
