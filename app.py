@@ -102,12 +102,25 @@ with st.sidebar:
     selected_model_id = selected_model_meta["id"]
     active_provider = selected_model_meta["provider"]
 
-    # Web search toggle
+    # --- WEB SEARCH CONTROLS ---
     web_search_enabled = st.toggle(
         "🌐 Enable Live Web Search",
         value=True,
         help="Uses YOUR Tavily + Firecrawl keys (not OpenRouter credits)."
     )
+
+    # NEW: Search provider selector
+    search_provider = "Tavily (Fast + AI-Optimized)"
+    if web_search_enabled:
+        search_provider = st.selectbox(
+            "🔎 Search Provider:",
+            options=[
+                "Tavily (Fast + AI-Optimized)",
+                "Firecrawl (Deep Content Extraction)",
+            ],
+            index=0,
+            help="Primary search engine. The other one auto-activates as backup if this fails."
+        )
 
     user_custom_key = st.text_input(
         f"🔑 Custom {active_provider.upper()} Key Override (Optional):",
@@ -197,14 +210,22 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
                 "Toggle to **Auto Free Router** to analyze worksheet photos."
             )
         else:
-            # --- WEB SEARCH WITH YOUR TAVILY + FIRECRAWL KEYS ---
+            # --- WEB SEARCH WITH SELECTED PROVIDER + AUTO FALLBACK ---
             search_context = ""
             if web_search_enabled:
-                with st.spinner("🔍 Searching the web..."):
-                    if TAVILY_API_KEY:
-                        search_context = tavily_search(prompt)
-                    if (not search_context or "failed" in search_context.lower() or "unavailable" in search_context.lower()) and FIRECRAWL_API_KEY:
-                        search_context = firecrawl_search(prompt)
+                with st.spinner(f"🔍 Searching with {search_provider}..."):
+                    if "Tavily" in search_provider:
+                        # Primary: Tavily, backup: Firecrawl
+                        if TAVILY_API_KEY:
+                            search_context = tavily_search(prompt)
+                        if (not search_context or "failed" in search_context.lower() or "unavailable" in search_context.lower()) and FIRECRAWL_API_KEY:
+                            search_context = firecrawl_search(prompt)
+                    else:
+                        # Primary: Firecrawl, backup: Tavily
+                        if FIRECRAWL_API_KEY:
+                            search_context = firecrawl_search(prompt)
+                        if (not search_context or "failed" in search_context.lower() or "unavailable" in search_context.lower()) and TAVILY_API_KEY:
+                            search_context = tavily_search(prompt)
 
             client = OpenAI(base_url=BASE_URL, api_key=ACTIVE_API_KEY)
 
