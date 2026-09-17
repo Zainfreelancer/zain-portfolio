@@ -109,7 +109,6 @@ with st.sidebar:
         help="Uses YOUR Tavily + Firecrawl keys (not OpenRouter credits)."
     )
 
-    # NEW: Search provider selector
     search_provider = "Tavily (Fast + AI-Optimized)"
     if web_search_enabled:
         search_provider = st.selectbox(
@@ -215,13 +214,11 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
             if web_search_enabled:
                 with st.spinner(f"🔍 Searching with {search_provider}..."):
                     if "Tavily" in search_provider:
-                        # Primary: Tavily, backup: Firecrawl
                         if TAVILY_API_KEY:
                             search_context = tavily_search(prompt)
                         if (not search_context or "failed" in search_context.lower() or "unavailable" in search_context.lower()) and FIRECRAWL_API_KEY:
                             search_context = firecrawl_search(prompt)
                     else:
-                        # Primary: Firecrawl, backup: Tavily
                         if FIRECRAWL_API_KEY:
                             search_context = firecrawl_search(prompt)
                         if (not search_context or "failed" in search_context.lower() or "unavailable" in search_context.lower()) and TAVILY_API_KEY:
@@ -229,10 +226,12 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
 
             client = OpenAI(base_url=BASE_URL, api_key=ACTIVE_API_KEY)
 
+            # FIXED: Clean system prompt — no "use the web search tool" language
             system_prompt = r"""You are a world-class, empathetic homework assistant named CraftGPT. Help step by step and explain clearly with strict mathematical accuracy. ALWAYS use LaTeX formatting enclosed in double dollar signs for blocks (e.g., \[x^2\]) or single dollar signs for inline text (e.g., x)."""
 
+            # FIXED: Inject search results as plain context, not as a tool the model must call
             if search_context and "unavailable" not in search_context.lower() and "failed" not in search_context.lower():
-                system_prompt += f"\n\nLive web search results for the user's query:\n\n{search_context}\n\nUse these results to inform your answer. Cite sources when appropriate."
+                system_prompt += f"\n\nHere is some up-to-date information that may help answer the user's question:\n\n{search_context}\n\nUse this information to inform your answer. Cite sources when appropriate. Do not attempt to call any search tools yourself — the search has already been done for you."
 
             api_messages = [{"role": "system", "content": system_prompt}]
 
