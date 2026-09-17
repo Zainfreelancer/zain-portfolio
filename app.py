@@ -1,13 +1,15 @@
 import os
 import io
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import streamlit as st
 from PIL import Image
 from openai import OpenAI
 import requests
 from supabase import create_client, Client
+from skyfield.api import load, wgs84
+from skyfield import almanac
 
 # 1. Set browser tab layout parameters cleanly
 st.set_page_config(page_title="CraftGPT App", page_icon="🚀", layout="centered")
@@ -44,11 +46,20 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
+# --- SKYFIELD EPHEMERIS (lazy-loaded) ---
+@st.cache_resource
+def load_ephemeris():
+    try:
+        ts = load.timescale()
+        eph = load('de440s.bsp')
+        return ts, eph
+    except Exception:
+        return None, None
+
 # --- AUTHENTICATION GATE ---
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# Try to restore session (after magic link / GitHub redirect)
 if st.session_state.user is None and supabase:
     try:
         session = supabase.auth.get_session()
@@ -57,7 +68,6 @@ if st.session_state.user is None and supabase:
     except Exception:
         pass
 
-# Login screen if not authenticated
 if st.session_state.user is None:
     st.markdown("### 🔐 Welcome to CraftGPT")
     st.markdown("Please sign in to continue, or continue as a guest:")
@@ -89,13 +99,11 @@ if st.session_state.user is None:
                         "options": {"email_redirect_to": APP_URL}
                     })
                     st.success(f"✅ Magic link sent to **{email}**. Check your inbox.")
-                    st.info("After clicking the link, come back here.")
                 except Exception as e:
                     st.error(f"Failed to send link: {e}")
 
     st.divider()
 
-    # --- GUEST MODE ---
     if st.button("👤 Continue as Guest", use_container_width=True):
         try:
             guest_session = supabase.auth.sign_in_anonymously()
@@ -105,7 +113,6 @@ if st.session_state.user is None:
             st.error(f"Guest login failed: {e}")
 
     st.caption("⚠️ Guest chats are temporary and will be lost when you close the tab or log out.")
-
     st.stop()
 
 # --- LOGGED IN (or GUEST) ---
@@ -113,12 +120,11 @@ user_id = st.session_state.user.id
 user_email = getattr(st.session_state.user, "email", None)
 is_guest = user_email is None or getattr(st.session_state.user, "is_anonymous", False)
 
-# --- DATABASE HELPERS (per-user) ---
+# --- DATABASE HELPERS ---
 def load_sessions():
     if not supabase: return []
     try:
-        response = supabase.table("chat_sessions").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
-        return response.data
+        return supabase.table("chat_sessions").select("*").eq("user_id", user_id).order("created_at", desc=True).execute().data
     except Exception as e:
         st.error(f"Failed to load sessions: {e}")
         return []
@@ -126,8 +132,8 @@ def load_sessions():
 def create_session(name: str):
     if not supabase: return None
     try:
-        response = supabase.table("chat_sessions").insert({"session_name": name, "user_id": user_id}).execute()
-        return response.data[0] if response.data else None
+        r = supabase.table("chat_sessions").insert({"session_name": name, "user_id": user_id}).execute()
+        return r.data[0] if r.data else None
     except Exception as e:
         st.error(f"Failed to create session: {e}")
         return None
@@ -142,8 +148,7 @@ def delete_session(session_id: int):
 def load_messages(session_id: int):
     if not supabase: return []
     try:
-        response = supabase.table("chat_messages").select("*").eq("session_id", session_id).eq("user_id", user_id).order("created_at").execute()
-        return response.data
+        return supabase.table("chat_messages").select("*").eq("session_id", session_id).eq("user_id", user_id).order("created_at").execute().data
     except Exception as e:
         st.error(f"Failed to load messages: {e}")
         return []
@@ -158,7 +163,6 @@ def save_message(session_id: int, role: str, content: str):
         st.error(f"Failed to save message: {e}")
 
 def delete_all_guest_data():
-    """Clean up all guest sessions + messages when guest logs out."""
     if not supabase or not user_id: return
     try:
         supabase.table("chat_messages").delete().eq("user_id", user_id).execute()
@@ -212,7 +216,7 @@ def firecrawl_search(query: str) -> str:
     except Exception as e:
         return f"Firecrawl search failed: {e}"
 
-# --- ASTRONOMY HELPER ---
+# --- IPGEOLOCATION ASTRONOMY HELPER ---
 def get_astronomy(location: str = "Islamabad,PK") -> str:
     if not IPGEOLOCATION_API_KEY: return "Astronomy data unavailable."
     try:
@@ -233,11 +237,58 @@ def get_astronomy(location: str = "Islamabad,PK") -> str:
     except Exception as e:
         return f"Astronomy lookup failed: {e}"
 
+# --- SKYFIELD PLANET RISE/SET HELPER ---
+def get_planet_riseset(planet_name: str) -> str:
+    """Compute precise planet rise/set times for Islamabad using Skyfield."""
+    try:
+        ts, eph = load_ephemeris()
+        if not ts or not eph:
+            return "Skyfield ephemeris not available."
+        
+        islamabad = wgs84.latlon(33.6844, 73.0479)
+        
+        planet_map = {
+            "mercury": eph['mercury'],
+            "venus": eph['venus'],
+            "mars": eph['mars'],
+            "jupiter": eph['jupiter barycenter'],
+            "saturn": eph['saturn barycenter'],
+        }
+        key = planet_name.lower()
+        if key not in planet_map:
+            return f"Planet '{planet_name}' not supported."
+        planet = planet_map[key]
+        
+        now = datetime.utcnow()
+        t0 = ts.utc(now.year, now.month, now.day)
+        t1 = ts.utc(now.year, now.month, now.day + 1)
+        
+        f = almanac.risings_and_settings(eph, planet, islamabad)
+        times, events = almanac.find_discrete(t0, t1, f)
+        
+        out = [f"**{planet_name.capitalize()} rise/set for Islamabad on {now.strftime('%Y-%m-%d')} (UTC):**\n"]
+        if len(times) == 0:
+            return f"No rise/set events found for {planet_name} today."
+        for ti, ei in zip(times, events):
+            label = "Rise" if ei == 1 else "Set"
+            out.append(f"• {label}: {ti.utc_strftime('%H:%M')} UTC")
+        return "\n".join(out)
+    except Exception as e:
+        return f"Planet calculation failed: {e}"
+
 def is_astronomy_query(text: str) -> bool:
     kw = ["sunrise","sunset","moonrise","moonset","moon phase","astronomy","twilight","solar noon",
           "day length","when does the sun","when does the moon","when is sunset","when is sunrise",
           "golden hour","blue hour","visible planet","planet visible"]
     return any(k in text.lower() for k in kw)
+
+def detect_planet(text: str):
+    """Returns (planet_name, True) if a planet is mentioned."""
+    planets = ["mercury", "venus", "mars", "jupiter", "saturn"]
+    for p in planets:
+        if p in text.lower():
+            return p, True
+    return None, False
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -245,22 +296,17 @@ with st.sidebar:
         st.info("👤 **Guest Mode**")
         st.caption("Chats are temporary. Sign in to save them permanently.")
         if st.button("🔐 Sign in to save chats", use_container_width=True):
-            # Clean up guest data before logging out
             delete_all_guest_data()
-            try:
-                supabase.auth.sign_out()
-            except Exception:
-                pass
+            try: supabase.auth.sign_out()
+            except Exception: pass
             st.session_state.user = None
             st.session_state.active_session_id = None
             st.rerun()
     else:
         st.success(f"👤 {user_email}")
         if st.button("🚪 Log out", use_container_width=True):
-            try:
-                supabase.auth.sign_out()
-            except Exception:
-                pass
+            try: supabase.auth.sign_out()
+            except Exception: pass
             st.session_state.user = None
             st.session_state.active_session_id = None
             st.rerun()
@@ -322,7 +368,7 @@ with st.sidebar:
         search_provider = "Tavily" if "Tavily" in choice else "Firecrawl"
         st.caption("🔄 Auto-Backup: Firecrawl" if search_provider == "Tavily" else "🔄 Auto-Backup: Tavily")
 
-    astronomy_enabled = st.toggle("🔭 Enable Astronomy Data (IPGeolocation)", value=True)
+    astronomy_enabled = st.toggle("🔭 Enable Astronomy Data", value=True)
     user_custom_key = st.text_input(f"🔑 Custom {active_provider.upper()} Key Override (Optional):", type="password")
     st.header("📸 Media input panel")
     uploaded_file = st.file_uploader("Snapshot your worksheet/page:", type=["jpg","jpeg","png"], key="homework_file")
@@ -372,11 +418,18 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
         elif img_base64 and not is_vision:
             placeholder.error(f"🛑 **{selected_model_name}** is text-only. Use **Auto Free Router** for images.")
         else:
+            # --- ASTRONOMY DATA ---
             astro_ctx = ""
-            if astronomy_enabled and is_astronomy_query(prompt):
+            planet_name, is_planet = detect_planet(prompt)
+
+            if astronomy_enabled and is_planet:
+                with st.spinner(f"🪐 Calculating {planet_name.capitalize()} position..."):
+                    astro_ctx = get_planet_riseset(planet_name)
+            elif astronomy_enabled and is_astronomy_query(prompt):
                 with st.spinner("🔭 Fetching astronomy data..."):
                     astro_ctx = get_astronomy("Islamabad,PK")
 
+            # --- WEB SEARCH ---
             search_ctx = ""
             if web_search_enabled:
                 with st.spinner(f"🔍 Searching with {search_provider}..."):
@@ -392,10 +445,21 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
             client = OpenAI(base_url=BASE_URL, api_key=ACTIVE_API_KEY)
             sys_prompt = r"""You are a world-class, empathetic homework assistant named CraftGPT. Help step by step with strict mathematical accuracy. ALWAYS use LaTeX in $$ for blocks or $ for inline."""
 
-            if astro_ctx and "unavailable" not in astro_ctx.lower():
-                sys_prompt += f"\n\nAstronomy data:\n\n{astro_ctx}\n\nUse this precise data. Do not call tools yourself."
+            if astro_ctx and "unavailable" not in astro_ctx.lower() and "failed" not in astro_ctx.lower():
+                sys_prompt += f"\n\nAstronomy data (calculated precisely for Islamabad):\n\n{astro_ctx}\n\nUse this precise data. Do NOT make up planet times yourself."
+
             if search_ctx and "unavailable" not in search_ctx.lower() and "failed" not in search_ctx.lower():
-                sys_prompt += f"\n\nLive web results:\n\n{search_ctx}\n\nUse this info. Cite sources. Do not call tools yourself."
+                sys_prompt += f"""
+
+⚠️ CRITICAL: You HAVE live web search capability. The following are REAL-TIME web results just retrieved from the internet. They are NOT from your training data.
+
+When you answer, you ARE browsing the web. You just completed a search. NEVER say "I cannot browse the web" — you literally just did.
+
+Live web results:
+{search_ctx}
+
+Answer using these live results. Cite source URLs when appropriate.
+"""
 
             api_messages = [{"role": "system", "content": sys_prompt}]
             for m in load_messages(st.session_state.active_session_id)[-4:]:
