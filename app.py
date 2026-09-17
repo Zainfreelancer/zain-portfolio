@@ -34,13 +34,21 @@ GLOBAL_GROQ_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
 with st.sidebar:
     st.header("⚙️ Configuration")
 
-    # 🌟 DUAL-PROVIDER MODEL SELECTOR MAPPING (verified free models only)
+    # 🌟 FREE MODEL SELECTOR MAPPING WITH DESCRIPTIONS
+    # Only verified-working free models as of Sept 2026
     model_mapping = {
-        "Auto Free Router (Best for Images)": {"id": "openrouter/free", "provider": "openrouter"},
-        "DeepSeek R1 (Free Math Proofs)": {"id": "deepseek/deepseek-r1:free", "provider": "openrouter"},
-        "Gemma 3 27B (Free Vision)": {"id": "google/gemma-3-27b-it:free", "provider": "openrouter"},
-        "Ling 3.0 Flash VL (Free Vision)": {"id": "inclusionai/ling-3.0-flash-vl:free", "provider": "openrouter"},
-        "Llama 3.3 70B (Groq Backup - Ultra Fast)": {"id": "llama-3.3-70b-versatile", "provider": "groq"}
+        "🎯 Auto Free Router — Best for images, diagrams & general homework":
+            {"id": "openrouter/free", "provider": "openrouter"},
+
+        "🧠 Nemotron 3 Ultra — Deep math, long proofs & reasoning (1M context)":
+            {"id": "nvidia/nemotron-3-ultra-550b-a55b:free", "provider": "openrouter"},
+        "💻 Laguna S 2.1 — Coding, programming & debugging help":
+            {"id": "poolside/laguna-s-2.1:free", "provider": "openrouter"},
+        "⚡ Nemotron 3 Super — Fast answers, multi-agent workflows (1M context)":
+            {"id": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter"},
+
+        "⚡ Groq GPT OSS 120B — Fast backup for general chat & homework":
+            {"id": "openai/gpt-oss-120b", "provider": "groq"},
     }
 
     selected_model_name = st.selectbox(
@@ -120,12 +128,8 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
 
     user_content = [{"type": "text", "text": prompt}]
 
-    # Vision-capable free models (verified from OpenRouter)
-    vision_models = [
-        "openrouter/free",
-        "google/gemma-3-27b-it:free",
-        "inclusionai/ling-3.0-flash-vl:free"
-    ]
+    # Only openrouter/free supports vision among our verified models
+    vision_models = ["openrouter/free"]
     is_vision_supported = selected_model_id in vision_models
 
     if img_base64 and is_vision_supported:
@@ -148,7 +152,7 @@ if prompt := st.chat_input("Ask CraftGPT a homework question..."):
         elif img_base64 and not is_vision_supported:
             response_placeholder.error(
                 f"🛑 **Model Vision Conflict:** You uploaded an image, but **{selected_model_name}** is a text-only model profile. "
-                "Please toggle over to **Auto Free Router**, **Gemma 3 27B**, or **Ling 3.0 Flash VL** in the sidebar configuration dropdown to analyze worksheet photos."
+                "Please toggle over to **Auto Free Router** in the sidebar configuration dropdown to analyze worksheet photos."
             )
         else:
             client = OpenAI(
