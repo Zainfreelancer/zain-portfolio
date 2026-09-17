@@ -48,7 +48,7 @@ supabase = init_supabase()
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# Try to restore session from Supabase (after magic link / GitHub redirect)
+# Try to restore session (after magic link / GitHub redirect)
 if st.session_state.user is None and supabase:
     try:
         session = supabase.auth.get_session()
@@ -60,10 +60,9 @@ if st.session_state.user is None and supabase:
 # Login screen if not authenticated
 if st.session_state.user is None:
     st.markdown("### 🔐 Welcome to CraftGPT")
-    st.markdown("Please sign in to continue:")
-    
+    st.markdown("Please sign in to continue, or continue as a guest:")
+
     col1, col2 = st.columns(2)
-    
     with col1:
         if st.button("🐙 Sign in with GitHub", use_container_width=True):
             try:
@@ -74,10 +73,10 @@ if st.session_state.user is None:
                 st.markdown(f'<meta http-equiv="refresh" content="0; url={res.url}">', unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"GitHub login failed: {e}")
-    
+
     with col2:
         st.markdown("**Or use email:**")
-    
+
     with st.form("magic_link_form"):
         email = st.text_input("📧 Gmail address:", placeholder="yourname@gmail.com")
         if st.form_submit_button("✉️ Send Magic Link", use_container_width=True):
@@ -93,12 +92,26 @@ if st.session_state.user is None:
                     st.info("After clicking the link, come back here.")
                 except Exception as e:
                     st.error(f"Failed to send link: {e}")
-    
+
+    st.divider()
+
+    # --- GUEST MODE ---
+    if st.button("👤 Continue as Guest", use_container_width=True):
+        try:
+            guest_session = supabase.auth.sign_in_anonymously()
+            st.session_state.user = guest_session.user
+            st.rerun()
+        except Exception as e:
+            st.error(f"Guest login failed: {e}")
+
+    st.caption("⚠️ Guest chats are temporary and will be lost when you close the tab or log out.")
+
     st.stop()
 
-# --- LOGGED IN ---
+# --- LOGGED IN (or GUEST) ---
 user_id = st.session_state.user.id
-user_email = st.session_state.user.email
+user_email = getattr(st.session_state.user, "email", None)
+is_guest = user_email is None or getattr(st.session_state.user, "is_anonymous", False)
 
 # --- DATABASE HELPERS (per-user) ---
 def load_sessions():
@@ -143,6 +156,15 @@ def save_message(session_id: int, role: str, content: str):
         }).execute()
     except Exception as e:
         st.error(f"Failed to save message: {e}")
+
+def delete_all_guest_data():
+    """Clean up all guest sessions + messages when guest logs out."""
+    if not supabase or not user_id: return
+    try:
+        supabase.table("chat_messages").delete().eq("user_id", user_id).execute()
+        supabase.table("chat_sessions").delete().eq("user_id", user_id).execute()
+    except Exception:
+        pass
 
 # --- SESSION INIT ---
 if "active_session_id" not in st.session_state:
@@ -219,15 +241,29 @@ def is_astronomy_query(text: str) -> bool:
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.success(f"👤 {user_email}")
-    if st.button("🚪 Log out", use_container_width=True):
-        try:
-            supabase.auth.sign_out()
-        except Exception:
-            pass
-        st.session_state.user = None
-        st.session_state.active_session_id = None
-        st.rerun()
+    if is_guest:
+        st.info("👤 **Guest Mode**")
+        st.caption("Chats are temporary. Sign in to save them permanently.")
+        if st.button("🔐 Sign in to save chats", use_container_width=True):
+            # Clean up guest data before logging out
+            delete_all_guest_data()
+            try:
+                supabase.auth.sign_out()
+            except Exception:
+                pass
+            st.session_state.user = None
+            st.session_state.active_session_id = None
+            st.rerun()
+    else:
+        st.success(f"👤 {user_email}")
+        if st.button("🚪 Log out", use_container_width=True):
+            try:
+                supabase.auth.sign_out()
+            except Exception:
+                pass
+            st.session_state.user = None
+            st.session_state.active_session_id = None
+            st.rerun()
 
     st.divider()
     st.header("💬 Chat Sessions")
