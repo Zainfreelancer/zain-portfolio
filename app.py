@@ -258,12 +258,13 @@ with st.sidebar:
                 st.rerun()
     st.divider()
     st.header("⚙️ Configuration")
+    
     model_mapping = {
-        "🖼️ Ling 3.0 Flash VL (Vision + Agent)": {"id": "inclusionai/ling-3.0-flash-vl:free", "provider": "openrouter"},
-        "🦉 Owl Alpha (Long Context Agent)": {"id": "openrouter/owl-alpha", "provider": "openrouter"},
-        "🧠 Nemotron 3 Super (Deep Reasoning)": {"id": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter"},
-        "💻 North Mini Code (Agentic Coding)": {"id": "cohere/north-mini-code:free", "provider": "openrouter"},
-    }
+    "🖼️ Ling 3.0 Flash VL (Vision + Agent)": {"id": "inclusionai/ling-3.0-flash-vl:free", "provider": "openrouter"},
+    "🚀 Gemma 4 31B (Vision + Agent)": {"id": "google/gemma-4-31b-it:free", "provider": "openrouter"},
+    "🧠 Nemotron 3 Super (Deep Reasoning)": {"id": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter"},
+    "💻 North Mini Code (Agentic Coding)": {"id": "cohere/north-mini-code:free", "provider": "openrouter"},
+}
     selected_model_name = st.selectbox("Choose Agent Brain:", options=list(model_mapping.keys()), index=0)
     selected_model_id = model_mapping[selected_model_name]["id"]
     st.header("📸 Media input panel")
