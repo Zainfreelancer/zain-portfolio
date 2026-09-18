@@ -4,3 +4,7 @@ Pillow>=10.0.0
 requests>=2.31.0
 supabase>=2.0.0
 astronomy-engine>=2.1.19
+langgraph>=1.0.0
+langchain>=1.0.0
+langchain-openai>=1.0.0
+youngjin-langchain-tools>=0.2.1
