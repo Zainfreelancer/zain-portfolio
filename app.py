@@ -27,6 +27,10 @@ st.markdown("""
 st.title("🚀 CraftGPT Agent")
 st.caption("Autonomous Homework Agent | Powered by OpenRouter")
 
+# --- UPLOADER KEY FOR FORCING REFRESH ---
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+
 # --- API KEYS ---
 OPENROUTER_KEY = st.secrets.get("OPENROUTER_API_KEY") or os.getenv("OPENROUTER_API_KEY")
 GROQ_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
@@ -203,7 +207,6 @@ agent_tools = [internet_search, deep_scrape, astronomy_data, planet_riseset]
 
 # --- AGENT FACTORY (OpenRouter → Cerebras → Groq) ---
 def get_agent(model_id):
-    """Primary: OpenRouter. Backup 1: Cerebras. Backup 2: Groq."""
     try:
         model = ChatOpenAI(model=model_id, base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY, temperature=0.1)
         return create_react_agent(model, agent_tools, checkpointer=InMemorySaver())
@@ -264,7 +267,12 @@ with st.sidebar:
     selected_model_name = st.selectbox("Choose Agent Brain:", options=list(model_mapping.keys()), index=0)
     selected_model_id = model_mapping[selected_model_name]["id"]
     st.header("📸 Media input panel")
-    uploaded_file = st.file_uploader("Snapshot your worksheet/page:", type=["jpg","jpeg","png"], key="homework_file")
+    # FIXED: Dynamic key forces a fresh uploader after each message
+    uploaded_file = st.file_uploader(
+        "Snapshot your worksheet/page:",
+        type=["jpg", "jpeg", "png"],
+        key=f"homework_file_{st.session_state.uploader_key}"
+    )
 
 # --- RENDER CHAT HISTORY ---
 if st.session_state.active_session_id:
@@ -320,8 +328,9 @@ if prompt := st.chat_input("Ask CraftGPT..."):
                 )
                 st.write(response)
                 save_message(st.session_state.active_session_id, "assistant", response)
+                # FIXED: Increment uploader key instead of setting it to None
                 if img_base64:
-                    st.session_state["homework_file"] = None
+                    st.session_state.uploader_key += 1
                 st.rerun()
             except Exception as exc:
                 st.error(f"Agent error: {exc}")
