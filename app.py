@@ -113,7 +113,7 @@ if st.session_state.user is None:
     st.divider()
     if st.button("👤 Continue as Guest", use_container_width=True):
         try:
-            guest = supabase.auth.sign_in_anonymous()
+            guest = supabase.auth.sign_in_anonymously()
             st.session_state.user = guest.user
             st.rerun()
         except Exception as e:
