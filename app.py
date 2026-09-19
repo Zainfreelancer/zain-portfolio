@@ -1,6 +1,9 @@
 import os
 import io
 import base64
+import subprocess
+import sys
+import sqlite3
 from datetime import datetime
 
 import streamlit as st
@@ -13,7 +16,10 @@ from astronomy import Observer, SearchRiseSet, Direction, Body
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import StateGraph, MessagesState, START, END
+from langgraph_reflection import create_reflection_graph
+from openevals.llm import create_llm_as_judge
 from youngjin_langchain_tools import StreamlitLanggraphHandler
 
 # --- PAGE CONFIG ---
@@ -25,9 +31,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 st.title("🚀 CraftGPT Agent")
-st.caption("Autonomous Homework Agent | Powered by OpenRouter")
+st.caption("Autonomous Homework Agent | Tier 3 Codex-Style")
 
-# --- UPLOADER KEY FOR FORCING REFRESH ---
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 
@@ -41,6 +46,17 @@ IPGEO_KEY = st.secrets.get("IPGEOLOCATION_API_KEY") or os.getenv("IPGEOLOCATION_
 SUPABASE_URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
 APP_URL = st.secrets.get("APP_URL", "https://your-app.streamlit.app")
+
+# --- WORKSPACE DIRECTORY (for file tools) ---
+WORKSPACE = "agent_workspace"
+os.makedirs(WORKSPACE, exist_ok=True)
+
+# --- PERSISTENT CHECKPOINTER ---
+@st.cache_resource
+def get_checkpointer():
+    conn = sqlite3.connect("agent_memory.db", check_same_thread=False)
+    return SqliteSaver(conn)
+checkpointer = get_checkpointer()
 
 # --- SUPABASE CLIENT ---
 @st.cache_resource
@@ -87,7 +103,7 @@ if st.session_state.user is None:
     st.divider()
     if st.button("👤 Continue as Guest", use_container_width=True):
         try:
-            guest = supabase.auth.sign_in_anonymously()
+            guest = supabase.auth.sign_in_anonymous()
             st.session_state.user = guest.user
             st.rerun()
         except Exception as e:
@@ -122,7 +138,6 @@ def delete_all_guest_data():
         try: supabase.table("chat_messages").delete().eq("user_id", user_id).execute(); supabase.table("chat_sessions").delete().eq("user_id", user_id).execute()
         except Exception: pass
 
-# --- SESSION INIT ---
 if "active_session_id" not in st.session_state:
     sessions = load_sessions()
     if sessions: st.session_state.active_session_id = sessions[0]["id"]
@@ -130,7 +145,7 @@ if "active_session_id" not in st.session_state:
         new = create_session("Chat 1")
         st.session_state.active_session_id = new["id"] if new else None
 
-# --- TOOL DEFINITIONS ---
+# --- EXISTING TOOL FUNCTIONS ---
 def tavily_search(query):
     if not TAVILY_KEY: return "Search unavailable."
     try:
@@ -182,7 +197,85 @@ def get_planet_riseset(planet_name):
         return "\n".join(out) if (rise or set_t) else f"No rise/set for {planet_name}."
     except Exception as e: return f"Planet failed: {e}"
 
-# --- WRAP AS LANGCHAIN TOOLS ---
+# --- CODE EXECUTION TOOL ---
+@tool
+def run_python(code: str) -> str:
+    """Execute Python code in a restricted subprocess and return stdout/stderr."""
+    import tempfile
+    temp_file = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(code)
+            temp_file = f.name
+        result = subprocess.run(
+            [sys.executable, temp_file],
+            capture_output=True, text=True, timeout=20
+        )
+        if result.returncode == 0:
+            return f"✅ Success:\n{result.stdout}"
+        else:
+            return f"❌ Error:\n{result.stderr}"
+    except subprocess.TimeoutExpired:
+        return "⏱️ Execution timed out after 20 seconds."
+    except Exception as e:
+        return f"Execution failed: {e}"
+    finally:
+        if temp_file and os.path.exists(temp_file):
+            try: os.unlink(temp_file)
+            except Exception: pass
+
+# --- FILE SYSTEM TOOLS (Codex-style) ---
+@tool
+def read_file(path: str) -> str:
+    """Read a file's contents from the agent workspace."""
+    safe_path = os.path.join(WORKSPACE, os.path.basename(path))
+    try:
+        with open(safe_path, 'r') as f:
+            return f.read()
+    except FileNotFoundError:
+        return f"File not found: {path}"
+    except Exception as e:
+        return f"Error reading file: {e}"
+
+@tool
+def write_file(path: str, content: str) -> str:
+    """Write content to a file in the agent workspace."""
+    safe_path = os.path.join(WORKSPACE, os.path.basename(path))
+    try:
+        with open(safe_path, 'w') as f:
+            f.write(content)
+        return f"✅ Successfully wrote {len(content)} chars to {path}"
+    except Exception as e:
+        return f"Error writing file: {e}"
+
+@tool
+def edit_file(path: str, old_text: str, new_text: str) -> str:
+    """Replace old_text with new_text in a file. Use for surgical edits."""
+    safe_path = os.path.join(WORKSPACE, os.path.basename(path))
+    try:
+        with open(safe_path, 'r') as f:
+            content = f.read()
+        if old_text not in content:
+            return f"❌ Error: '{old_text[:50]}...' not found in {path}"
+        content = content.replace(old_text, new_text, 1)
+        with open(safe_path, 'w') as f:
+            f.write(content)
+        return f"✅ Successfully edited {path}"
+    except FileNotFoundError:
+        return f"File not found: {path}"
+    except Exception as e:
+        return f"Error editing file: {e}"
+
+@tool
+def list_files() -> str:
+    """List all files in the agent workspace."""
+    try:
+        files = os.listdir(WORKSPACE)
+        return "\n".join(files) if files else "Workspace is empty."
+    except Exception as e:
+        return f"Error listing files: {e}"
+
+# --- WRAP EXISTING FUNCTIONS AS LANGCHAIN TOOLS ---
 @tool
 def internet_search(query: str) -> str:
     """Search the web for current information, news, or facts."""
@@ -203,23 +296,85 @@ def planet_riseset(planet: str) -> str:
     """Calculate planet rise/set times for Islamabad."""
     return get_planet_riseset(planet)
 
-agent_tools = [internet_search, deep_scrape, astronomy_data, planet_riseset]
-
-# --- AGENT FACTORY (OpenRouter → Cerebras → Groq) ---
-def get_agent(model_id):
+# --- SUB-AGENT (Codex-style delegation) ---
+def create_research_subagent():
+    """Creates a specialized sub-agent for research tasks."""
     try:
-        model = ChatOpenAI(model=model_id, base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY, temperature=0.1)
-        return create_react_agent(model, agent_tools, checkpointer=InMemorySaver())
+        sub_model = ChatOpenAI(
+            model="inclusionai/ling-3.0-flash-vl:free",
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_KEY,
+            temperature=0.1
+        )
+        sub_tools = [internet_search, deep_scrape]
+        return create_react_agent(sub_model, sub_tools)
     except Exception:
-        pass
-    if CEREBRAS_KEY:
-        try:
-            model = ChatOpenAI(model="gpt-oss-120b", base_url="https://api.cerebras.ai/v1", api_key=CEREBRAS_KEY, temperature=0.1)
-            return create_react_agent(model, agent_tools, checkpointer=InMemorySaver())
-        except Exception:
-            pass
-    model = ChatOpenAI(model="openai/gpt-oss-120b", base_url="https://api.groq.com/openai/v1", api_key=GROQ_KEY, temperature=0.1)
-    return create_react_agent(model, agent_tools, checkpointer=InMemorySaver())
+        return None
+
+@tool
+def delegate_research(query: str) -> str:
+    """Delegate a research task to a specialized sub-agent. Use this for complex multi-source research."""
+    subagent = create_research_subagent()
+    if not subagent:
+        return "Research sub-agent unavailable."
+    try:
+        result = subagent.invoke({"messages": [{"role": "user", "content": query}]})
+        return result["messages"][-1].content
+    except Exception as e:
+        return f"Research delegation failed: {e}"
+
+agent_tools = [
+    internet_search, deep_scrape, astronomy_data, planet_riseset,
+    run_python, read_file, write_file, edit_file, list_files,
+    delegate_research,
+]
+
+# --- REFLECTION GRAPH ---
+def build_reflection_agent(model_id, provider):
+    if provider == "cerebras":
+        model = ChatOpenAI(model=model_id, base_url="https://api.cerebras.ai/v1", api_key=CEREBRAS_KEY, temperature=0.1)
+    elif provider == "groq":
+        model = ChatOpenAI(model=model_id, base_url="https://api.groq.com/openai/v1", api_key=GROQ_KEY, temperature=0.1)
+    else:
+        model = ChatOpenAI(model=model_id, base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY, temperature=0.1)
+
+    assistant = create_react_agent(model, agent_tools, checkpointer=checkpointer)
+
+    def call_model(state):
+        response = model.invoke(state["messages"])
+        return {"messages": [response]}
+
+    assistant_graph = (
+        StateGraph(MessagesState)
+        .add_node("assistant", call_model)
+        .add_edge(START, "assistant")
+        .add_edge("assistant", END)
+    )
+
+    def judge_response(state, config):
+        evaluator = create_llm_as_judge(
+            prompt="""You are an expert judge evaluating AI responses.
+            Evaluate: accuracy, completeness, clarity, helpfulness, safety.
+            If the response meets ALL criteria, set pass to True.
+            If you find ANY issues, provide specific feedback and set pass to False.""",
+            model="openrouter:inclusionai/ling-3.0-flash-vl:free",
+            feedback_key="pass",
+        )
+        eval_result = evaluator(outputs=state["messages"][-1].content, inputs=None)
+        if eval_result.get("pass"):
+            return {"messages": []}
+        else:
+            return {"messages": [{"role": "user", "content": eval_result.get("comment", "Please improve.")}]}
+
+    judge_graph = (
+        StateGraph(MessagesState)
+        .add_node("judge", judge_response)
+        .add_edge(START, "judge")
+        .add_edge("judge", END)
+    )
+
+    reflection_app = create_reflection_graph(assistant_graph, judge_graph)
+    return reflection_app.compile(checkpointer=checkpointer)
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -258,17 +413,16 @@ with st.sidebar:
                 st.rerun()
     st.divider()
     st.header("⚙️ Configuration")
-    
     model_mapping = {
-    "🖼️ Ling 3.0 Flash VL (Vision + Agent)": {"id": "inclusionai/ling-3.0-flash-vl:free", "provider": "openrouter"},
-    "🚀 Gemma 4 31B (Vision + Agent)": {"id": "google/gemma-4-31b-it:free", "provider": "openrouter"},
-    "🧠 Nemotron 3 Super (Deep Reasoning)": {"id": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter"},
-    "💻 North Mini Code (Agentic Coding)": {"id": "cohere/north-mini-code:free", "provider": "openrouter"},
-}
+        "🖼️ Ling 3.0 Flash VL (Vision + Agent)": {"id": "inclusionai/ling-3.0-flash-vl:free", "provider": "openrouter"},
+        "🚀 Gemma 4 31B (Vision + Agent)": {"id": "google/gemma-4-31b-it:free", "provider": "openrouter"},
+        "🧠 Nemotron 3 Super (Deep Reasoning)": {"id": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter"},
+        "💻 North Mini Code (Agentic Coding)": {"id": "cohere/north-mini-code:free", "provider": "openrouter"},
+        "⚡ Cerebras GPT OSS 120B (Fast Agent)": {"id": "gpt-oss-120b", "provider": "cerebras"},
+    }
     selected_model_name = st.selectbox("Choose Agent Brain:", options=list(model_mapping.keys()), index=0)
     selected_model_id = model_mapping[selected_model_name]["id"]
     st.header("📸 Media input panel")
-    # FIXED: Dynamic key forces a fresh uploader after each message
     uploaded_file = st.file_uploader(
         "Snapshot your worksheet/page:",
         type=["jpg", "jpeg", "png"],
@@ -298,18 +452,17 @@ if prompt := st.chat_input("Ask CraftGPT..."):
         if not OPENROUTER_KEY:
             st.error("No OpenRouter API key configured.")
         else:
-            agent = get_agent(selected_model_id)
+            provider = model_mapping[selected_model_name]["provider"]
+            agent = build_reflection_agent(selected_model_id, provider)
             handler = StreamlitLanggraphHandler(
                 container=st.container(),
                 expand_new_thoughts=True,
                 show_tool_calls=True,
                 show_tool_results=True
             )
-
             vision_models = ["inclusionai/ling-3.0-flash-vl:free"]
             if img_base64 and selected_model_id not in vision_models:
                 st.warning("⚠️ The selected model is text-only. Switch to **Ling 3.0 Flash VL** to analyze images.")
-
             try:
                 if img_base64:
                     user_message = {
@@ -321,7 +474,6 @@ if prompt := st.chat_input("Ask CraftGPT..."):
                     }
                 else:
                     user_message = {"role": "user", "content": prompt}
-
                 response = handler.invoke(
                     agent=agent,
                     input={"messages": [user_message]},
@@ -329,7 +481,6 @@ if prompt := st.chat_input("Ask CraftGPT..."):
                 )
                 st.write(response)
                 save_message(st.session_state.active_session_id, "assistant", response)
-                # FIXED: Increment uploader key instead of setting it to None
                 if img_base64:
                     st.session_state.uploader_key += 1
                 st.rerun()
