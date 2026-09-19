@@ -3,7 +3,6 @@ import io
 import base64
 import subprocess
 import sys
-import sqlite3
 from datetime import datetime
 
 import streamlit as st
@@ -16,10 +15,8 @@ from astronomy import Observer, SearchRiseSet, Direction, Body
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.graph import StateGraph, MessagesState, START, END
-from langgraph_reflection import create_reflection_graph
-from openevals.llm import create_llm_as_judge
+from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg_pool import ConnectionPool
 from youngjin_langchain_tools import StreamlitLanggraphHandler
 
 # --- PAGE CONFIG ---
@@ -45,20 +42,33 @@ FIRECRAWL_KEY = st.secrets.get("FIRECRAWL_API_KEY") or os.getenv("FIRECRAWL_API_
 IPGEO_KEY = st.secrets.get("IPGEOLOCATION_API_KEY") or os.getenv("IPGEOLOCATION_API_KEY")
 SUPABASE_URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
+SUPABASE_DB_URL = st.secrets.get("SUPABASE_DB_URL") or os.getenv("SUPABASE_DB_URL")
 APP_URL = st.secrets.get("APP_URL", "https://your-app.streamlit.app")
 
-# --- WORKSPACE DIRECTORY (for file tools) ---
+# --- WORKSPACE DIRECTORY ---
 WORKSPACE = "agent_workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
-# --- PERSISTENT CHECKPOINTER ---
+# --- PERSISTENT CHECKPOINTER (Postgres-backed, survives reboots) ---
 @st.cache_resource
 def get_checkpointer():
-    conn = sqlite3.connect("agent_memory.db", check_same_thread=False)
-    return SqliteSaver(conn)
+    try:
+        pool = ConnectionPool(
+            SUPABASE_DB_URL,
+            max_size=5,
+            max_idle=300.0,
+            kwargs={"autocommit": True, "prepare_threshold": 0},
+        )
+        checkpointer = PostgresSaver(pool)
+        checkpointer.setup()  # Creates the checkpoint tables automatically
+        return checkpointer
+    except Exception as e:
+        st.error(f"Checkpointer failed to initialize: {e}")
+        return None
+
 checkpointer = get_checkpointer()
 
-# --- SUPABASE CLIENT ---
+# --- SUPABASE CLIENT (for auth + chat history) ---
 @st.cache_resource
 def init_supabase() -> Client:
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -126,7 +136,8 @@ def create_session(name):
         return r.data[0] if r.data else None
     except Exception: return None
 def delete_session(sid):
-    if supabase: supabase.table("chat_sessions").delete().eq("id", sid).eq("user_id", user_id).execute()
+    if supabase:
+        supabase.table("chat_sessions").delete().eq("id", sid).eq("user_id", user_id).execute()
 def load_messages(sid):
     if not supabase: return []
     try: return supabase.table("chat_messages").select("*").eq("session_id", sid).eq("user_id", user_id).order("created_at").execute().data
@@ -135,7 +146,9 @@ def save_message(sid, role, content):
     if supabase: supabase.table("chat_messages").insert({"session_id": sid, "user_id": user_id, "role": role, "content": content}).execute()
 def delete_all_guest_data():
     if supabase and user_id:
-        try: supabase.table("chat_messages").delete().eq("user_id", user_id).execute(); supabase.table("chat_sessions").delete().eq("user_id", user_id).execute()
+        try:
+            supabase.table("chat_messages").delete().eq("user_id", user_id).execute()
+            supabase.table("chat_sessions").delete().eq("user_id", user_id).execute()
         except Exception: pass
 
 if "active_session_id" not in st.session_state:
@@ -145,7 +158,7 @@ if "active_session_id" not in st.session_state:
         new = create_session("Chat 1")
         st.session_state.active_session_id = new["id"] if new else None
 
-# --- EXISTING TOOL FUNCTIONS ---
+# --- TOOL FUNCTIONS ---
 def tavily_search(query):
     if not TAVILY_KEY: return "Search unavailable."
     try:
@@ -207,14 +220,8 @@ def run_python(code: str) -> str:
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
             f.write(code)
             temp_file = f.name
-        result = subprocess.run(
-            [sys.executable, temp_file],
-            capture_output=True, text=True, timeout=20
-        )
-        if result.returncode == 0:
-            return f"✅ Success:\n{result.stdout}"
-        else:
-            return f"❌ Error:\n{result.stderr}"
+        result = subprocess.run([sys.executable, temp_file], capture_output=True, text=True, timeout=20)
+        return f"✅ Success:\n{result.stdout}" if result.returncode == 0 else f"❌ Error:\n{result.stderr}"
     except subprocess.TimeoutExpired:
         return "⏱️ Execution timed out after 20 seconds."
     except Exception as e:
@@ -224,47 +231,36 @@ def run_python(code: str) -> str:
             try: os.unlink(temp_file)
             except Exception: pass
 
-# --- FILE SYSTEM TOOLS (Codex-style) ---
+# --- FILE SYSTEM TOOLS ---
 @tool
 def read_file(path: str) -> str:
     """Read a file's contents from the agent workspace."""
     safe_path = os.path.join(WORKSPACE, os.path.basename(path))
     try:
-        with open(safe_path, 'r') as f:
-            return f.read()
-    except FileNotFoundError:
-        return f"File not found: {path}"
-    except Exception as e:
-        return f"Error reading file: {e}"
+        with open(safe_path, 'r') as f: return f.read()
+    except FileNotFoundError: return f"File not found: {path}"
+    except Exception as e: return f"Error reading file: {e}"
 
 @tool
 def write_file(path: str, content: str) -> str:
     """Write content to a file in the agent workspace."""
     safe_path = os.path.join(WORKSPACE, os.path.basename(path))
     try:
-        with open(safe_path, 'w') as f:
-            f.write(content)
+        with open(safe_path, 'w') as f: f.write(content)
         return f"✅ Successfully wrote {len(content)} chars to {path}"
-    except Exception as e:
-        return f"Error writing file: {e}"
+    except Exception as e: return f"Error writing file: {e}"
 
 @tool
 def edit_file(path: str, old_text: str, new_text: str) -> str:
-    """Replace old_text with new_text in a file. Use for surgical edits."""
+    """Replace old_text with new_text in a file."""
     safe_path = os.path.join(WORKSPACE, os.path.basename(path))
     try:
-        with open(safe_path, 'r') as f:
-            content = f.read()
-        if old_text not in content:
-            return f"❌ Error: '{old_text[:50]}...' not found in {path}"
-        content = content.replace(old_text, new_text, 1)
-        with open(safe_path, 'w') as f:
-            f.write(content)
+        with open(safe_path, 'r') as f: content = f.read()
+        if old_text not in content: return f"❌ Error: text not found in {path}"
+        with open(safe_path, 'w') as f: f.write(content.replace(old_text, new_text, 1))
         return f"✅ Successfully edited {path}"
-    except FileNotFoundError:
-        return f"File not found: {path}"
-    except Exception as e:
-        return f"Error editing file: {e}"
+    except FileNotFoundError: return f"File not found: {path}"
+    except Exception as e: return f"Error editing file: {e}"
 
 @tool
 def list_files() -> str:
@@ -272,10 +268,9 @@ def list_files() -> str:
     try:
         files = os.listdir(WORKSPACE)
         return "\n".join(files) if files else "Workspace is empty."
-    except Exception as e:
-        return f"Error listing files: {e}"
+    except Exception as e: return f"Error listing files: {e}"
 
-# --- WRAP EXISTING FUNCTIONS AS LANGCHAIN TOOLS ---
+# --- WRAP AS LANGCHAIN TOOLS ---
 @tool
 def internet_search(query: str) -> str:
     """Search the web for current information, news, or facts."""
@@ -296,85 +291,36 @@ def planet_riseset(planet: str) -> str:
     """Calculate planet rise/set times for Islamabad."""
     return get_planet_riseset(planet)
 
-# --- SUB-AGENT (Codex-style delegation) ---
+# --- SUB-AGENT ---
 def create_research_subagent():
-    """Creates a specialized sub-agent for research tasks."""
     try:
-        sub_model = ChatOpenAI(
-            model="inclusionai/ling-3.0-flash-vl:free",
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_KEY,
-            temperature=0.1
-        )
-        sub_tools = [internet_search, deep_scrape]
-        return create_react_agent(sub_model, sub_tools)
-    except Exception:
-        return None
+        sub_model = ChatOpenAI(model="inclusionai/ling-3.0-flash-vl:free",
+            base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY, temperature=0.1)
+        return create_react_agent(sub_model, [internet_search, deep_scrape])
+    except Exception: return None
 
 @tool
 def delegate_research(query: str) -> str:
-    """Delegate a research task to a specialized sub-agent. Use this for complex multi-source research."""
+    """Delegate a research task to a specialized sub-agent."""
     subagent = create_research_subagent()
-    if not subagent:
-        return "Research sub-agent unavailable."
+    if not subagent: return "Research sub-agent unavailable."
     try:
         result = subagent.invoke({"messages": [{"role": "user", "content": query}]})
         return result["messages"][-1].content
-    except Exception as e:
-        return f"Research delegation failed: {e}"
+    except Exception as e: return f"Research delegation failed: {e}"
 
-agent_tools = [
-    internet_search, deep_scrape, astronomy_data, planet_riseset,
-    run_python, read_file, write_file, edit_file, list_files,
-    delegate_research,
-]
+agent_tools = [internet_search, deep_scrape, astronomy_data, planet_riseset,
+               run_python, read_file, write_file, edit_file, list_files, delegate_research]
 
-# --- REFLECTION GRAPH ---
-def build_reflection_agent(model_id, provider):
+# --- AGENT BUILDER ---
+def build_agent(model_id, provider):
     if provider == "cerebras":
         model = ChatOpenAI(model=model_id, base_url="https://api.cerebras.ai/v1", api_key=CEREBRAS_KEY, temperature=0.1)
     elif provider == "groq":
         model = ChatOpenAI(model=model_id, base_url="https://api.groq.com/openai/v1", api_key=GROQ_KEY, temperature=0.1)
     else:
         model = ChatOpenAI(model=model_id, base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY, temperature=0.1)
-
-    assistant = create_react_agent(model, agent_tools, checkpointer=checkpointer)
-
-    def call_model(state):
-        response = model.invoke(state["messages"])
-        return {"messages": [response]}
-
-    assistant_graph = (
-        StateGraph(MessagesState)
-        .add_node("assistant", call_model)
-        .add_edge(START, "assistant")
-        .add_edge("assistant", END)
-    )
-
-    def judge_response(state, config):
-        evaluator = create_llm_as_judge(
-            prompt="""You are an expert judge evaluating AI responses.
-            Evaluate: accuracy, completeness, clarity, helpfulness, safety.
-            If the response meets ALL criteria, set pass to True.
-            If you find ANY issues, provide specific feedback and set pass to False.""",
-            model="openrouter:inclusionai/ling-3.0-flash-vl:free",
-            feedback_key="pass",
-        )
-        eval_result = evaluator(outputs=state["messages"][-1].content, inputs=None)
-        if eval_result.get("pass"):
-            return {"messages": []}
-        else:
-            return {"messages": [{"role": "user", "content": eval_result.get("comment", "Please improve.")}]}
-
-    judge_graph = (
-        StateGraph(MessagesState)
-        .add_node("judge", judge_response)
-        .add_edge(START, "judge")
-        .add_edge("judge", END)
-    )
-
-    reflection_app = create_reflection_graph(assistant_graph, judge_graph)
-    return reflection_app.compile(checkpointer=checkpointer)
+    return create_react_agent(model, agent_tools, checkpointer=checkpointer)
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -423,11 +369,8 @@ with st.sidebar:
     selected_model_name = st.selectbox("Choose Agent Brain:", options=list(model_mapping.keys()), index=0)
     selected_model_id = model_mapping[selected_model_name]["id"]
     st.header("📸 Media input panel")
-    uploaded_file = st.file_uploader(
-        "Snapshot your worksheet/page:",
-        type=["jpg", "jpeg", "png"],
-        key=f"homework_file_{st.session_state.uploader_key}"
-    )
+    uploaded_file = st.file_uploader("Snapshot your worksheet/page:", type=["jpg", "jpeg", "png"],
+        key=f"homework_file_{st.session_state.uploader_key}")
 
 # --- RENDER CHAT HISTORY ---
 if st.session_state.active_session_id:
@@ -435,7 +378,8 @@ if st.session_state.active_session_id:
         with st.chat_message(msg["role"], avatar=msg["role"]):
             st.write(msg["content"])
             if msg["role"] == "assistant":
-                st.download_button("📥 Download", data=msg["content"], file_name="solution.md", mime="text/markdown", key=f"dl_{msg['id']}")
+                st.download_button("📥 Download", data=msg["content"], file_name="solution.md",
+                    mime="text/markdown", key=f"dl_{msg['id']}")
 
 # --- IMAGE PROCESSING ---
 img_base64 = None
@@ -453,36 +397,25 @@ if prompt := st.chat_input("Ask CraftGPT..."):
             st.error("No OpenRouter API key configured.")
         else:
             provider = model_mapping[selected_model_name]["provider"]
-            agent = build_reflection_agent(selected_model_id, provider)
-            handler = StreamlitLanggraphHandler(
-                container=st.container(),
-                expand_new_thoughts=True,
-                show_tool_calls=True,
-                show_tool_results=True
-            )
+            agent = build_agent(selected_model_id, provider)
+            handler = StreamlitLanggraphHandler(container=st.container(),
+                expand_new_thoughts=True, show_tool_calls=True, show_tool_results=True)
             vision_models = ["inclusionai/ling-3.0-flash-vl:free"]
             if img_base64 and selected_model_id not in vision_models:
                 st.warning("⚠️ The selected model is text-only. Switch to **Ling 3.0 Flash VL** to analyze images.")
             try:
                 if img_base64:
-                    user_message = {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}
-                        ]
-                    }
+                    user_message = {"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}
+                    ]}
                 else:
                     user_message = {"role": "user", "content": prompt}
-                response = handler.invoke(
-                    agent=agent,
-                    input={"messages": [user_message]},
-                    config={"configurable": {"thread_id": st.session_state.active_session_id}}
-                )
+                response = handler.invoke(agent=agent, input={"messages": [user_message]},
+                    config={"configurable": {"thread_id": str(st.session_state.active_session_id)}})
                 st.write(response)
                 save_message(st.session_state.active_session_id, "assistant", response)
-                if img_base64:
-                    st.session_state.uploader_key += 1
+                if img_base64: st.session_state.uploader_key += 1
                 st.rerun()
             except Exception as exc:
                 st.error(f"Agent error: {exc}")
