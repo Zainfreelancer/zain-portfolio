@@ -8,3 +8,6 @@ langgraph>=1.0.0
 langchain>=1.0.0
 langchain-openai>=1.0.0
 youngjin-langchain-tools>=0.2.1
+langgraph-checkpoint-sqlite>=2.0.0
+langgraph-reflection>=0.1.0
+openevals>=0.1.0
