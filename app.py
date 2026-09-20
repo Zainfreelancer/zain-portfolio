@@ -74,16 +74,93 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-# --- AUTH HELPERS ---
-def username_to_email(username: str) -> str:
-    # Using a .com domain to pass Supabase's email format validator
-    return f"{username.strip().lower()}@craftgpt-auth.com"
+# --- PASSWORD HASHING ---
+import bcrypt
+import secrets as pysecrets
+
+def hash_pwd(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+def check_pwd(password: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode(), hashed.encode())
+    except Exception:
+        return False
+
+# --- AUTH FUNCTIONS ---
+def sign_up(username: str, password: str, email: str = ""):
+    username = username.strip().lower()
+    email = email.strip().lower()
+    if not username or not password:
+        return False, "Fill in all fields."
+    if " " in username:
+        return False, "Username cannot contain spaces."
+    if len(username) < 3:
+        return False, "Username must be 3+ characters."
+    if len(password) < 6:
+        return False, "Password must be 6+ characters."
+    try:
+        existing = supabase.table("profiles").select("id").eq("username", username).execute()
+        if existing.data:
+            return False, "Username already taken."
+        recovery = "-".join(pysecrets.token_hex(2).upper() for _ in range(3))
+        recovery_hash = bcrypt.hashpw(recovery.encode(), bcrypt.gensalt()).decode()
+        payload = {
+            "username": username,
+            "password_hash": hash_pwd(password),
+            "recovery_hash": recovery_hash,
+        }
+        if email:
+            payload["email"] = email
+        result = supabase.table("profiles").insert(payload).execute()
+        if result.data:
+            return True, recovery
+        return False, "Signup failed."
+    except Exception as e:
+        return False, f"Error: {e}"
+
+def log_in(username: str, password: str):
+    username = username.strip().lower()
+    try:
+        res = supabase.table("profiles").select("id, username, password_hash").eq("username", username).execute()
+        if not res.data:
+            return None
+        user = res.data[0]
+        if not user.get("password_hash"):
+            return None
+        if check_pwd(password, user["password_hash"]):
+            return {"id": user["id"], "username": user["username"]}
+        return None
+    except Exception:
+        return None
+
+def reset_password(username: str, recovery_code: str, new_password: str):
+    username = username.strip().lower()
+    if len(new_password) < 6:
+        return False, "Password must be 6+ characters."
+    try:
+        res = supabase.table("profiles").select("id, recovery_hash").eq("username", username).execute()
+        if not res.data:
+            return False, "Username not found."
+        user = res.data[0]
+        if not user.get("recovery_hash"):
+            return False, "No recovery code set for this account."
+        if not check_pwd(recovery_code.strip().upper(), user["recovery_hash"]):
+            return False, "Invalid recovery code."
+        supabase.table("profiles").update({
+            "password_hash": hash_pwd(new_password)
+        }).eq("id", user["id"]).execute()
+        return True, "Password updated!"
+    except Exception as e:
+        return False, f"Error: {e}"
 
 # --- AUTH GATE ---
 if "user" not in st.session_state:
     st.session_state.user = None
 if "is_guest" not in st.session_state:
     st.session_state.is_guest = False
+if "show_reset" not in st.session_state:
+    st.session_state.show_reset = False
 
 if st.session_state.user is None and not st.session_state.is_guest:
     st.markdown("### 🔐 Welcome to CraftGPT")
@@ -92,6 +169,35 @@ if st.session_state.user is None and not st.session_state.is_guest:
         st.error("❌ Supabase not configured. Check secrets.")
         st.stop()
 
+    # --- FORGOT PASSWORD ---
+    if st.session_state.show_reset:
+        st.markdown("#### 🔄 Reset Your Password")
+        with st.form("reset_form"):
+            r_user = st.text_input("Username")
+            r_code = st.text_input("Recovery code", placeholder="XXXX-XXXX-XXXX")
+            r_new1 = st.text_input("New password", type="password")
+            r_new2 = st.text_input("Confirm new password", type="password")
+            c1, c2 = st.columns(2)
+            with c1:
+                do_reset = st.form_submit_button("Reset Password", use_container_width=True)
+            with c2:
+                back = st.form_submit_button("← Back to Login", use_container_width=True)
+            if do_reset:
+                if r_new1 != r_new2:
+                    st.error("❌ Passwords don't match.")
+                else:
+                    ok, msg = reset_password(r_user, r_code, r_new1)
+                    if ok:
+                        st.success("✅ " + msg + " You can now log in.")
+                        st.session_state.show_reset = False
+                    else:
+                        st.error("❌ " + msg)
+            if back:
+                st.session_state.show_reset = False
+                st.rerun()
+        st.stop()
+
+    # --- LOGIN / SIGNUP ---
     tab_login, tab_signup = st.tabs(["🔐 Login", "📝 Sign Up"])
 
     with tab_login:
@@ -99,74 +205,53 @@ if st.session_state.user is None and not st.session_state.is_guest:
             login_user = st.text_input("Username", placeholder="yourname")
             login_pwd = st.text_input("Password", type="password")
             if st.form_submit_button("Login", use_container_width=True):
-                if not login_user or not login_pwd:
-                    st.error("Enter both username and password.")
+                user = log_in(login_user, login_pwd)
+                if user:
+                    st.session_state.user = user
+                    st.session_state.is_guest = False
+                    st.rerun()
                 else:
-                    try:
-                        res = supabase.auth.sign_in_with_password({
-                            "email": username_to_email(login_user),
-                            "password": login_pwd,
-                        })
-                        if res.user:
-                            st.session_state.user = res.user
-                            st.session_state.is_guest = False
-                            st.rerun()
-                        else:
-                            st.error("❌ Invalid username or password.")
-                    except Exception:
-                        st.error("❌ Invalid username or password.")
+                    st.error("❌ Invalid username or password.")
 
     with tab_signup:
         with st.form("signup_form"):
             new_user = st.text_input("Choose username", placeholder="yourname")
+            new_email = st.text_input("Email (optional)", placeholder="you@example.com")
             new_pwd = st.text_input("Password (min 6 chars)", type="password")
             new_pwd2 = st.text_input("Confirm password", type="password")
             if st.form_submit_button("Create account", use_container_width=True):
-                if not new_user or not new_pwd:
-                    st.error("Fill in both fields.")
-                elif new_pwd != new_pwd2:
+                if new_pwd != new_pwd2:
                     st.error("❌ Passwords don't match.")
-                elif len(new_pwd) < 6:
-                    st.error("❌ Password must be 6+ characters.")
                 else:
-                    try:
-                        res = supabase.auth.sign_up({
-                            "email": username_to_email(new_user),
-                            "password": new_pwd,
-                        })
-                        if res.user:
-                            # Insert profile row using the newly-authenticated session
-                            try:
-                                supabase.table("profiles").insert({
-                                    "id": res.user.id,
-                                    "username": new_user.strip().lower(),
-                                }).execute()
-                            except Exception as e:
-                                st.warning(f"Profile row: {e}")
-                            st.success("✅ Account created! Switch to Login tab and sign in.")
-                        else:
-                            st.error("❌ Sign up failed.")
-                    except Exception as e:
-                        st.error(f"❌ {e}")
+                    ok, result = sign_up(new_user, new_pwd, new_email)
+                    if ok:
+                        st.success("✅ Account created!")
+                        st.warning(
+                            f"### 🔑 SAVE THIS RECOVERY CODE\n\n"
+                            f"## `{result}`\n\n"
+                            "**Write it down right now.** You'll need it if you forget your password. "
+                            "It will **never** be shown again."
+                        )
+                    else:
+                        st.error(f"❌ {result}")
 
     st.divider()
-    if st.button("👤 Continue as Guest", use_container_width=True):
-        st.session_state.is_guest = True
-        st.session_state.user = None
-        st.rerun()
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("🔄 Forgot Password", use_container_width=True):
+            st.session_state.show_reset = True
+            st.rerun()
+    with col_b:
+        if st.button("🎮 Continue as Guest", use_container_width=True):
+            st.session_state.is_guest = True
+            st.session_state.user = None
+            st.rerun()
     st.stop()
 
 # --- AUTH SUCCESS PATH ---
 is_guest = st.session_state.is_guest
-user_id = st.session_state.user.id if st.session_state.user else None
-user_name = "guest"
-if not is_guest and user_id:
-    try:
-        prof = supabase.table("profiles").select("username").eq("id", user_id).execute()
-        if prof.data:
-            user_name = prof.data[0]["username"]
-    except Exception:
-        user_name = "user"
+user_id = st.session_state.user["id"] if st.session_state.user else None
+user_name = st.session_state.user["username"] if st.session_state.user else "guest"
 
 # --- DATABASE HELPERS ---
 def load_sessions():
@@ -416,7 +501,7 @@ def build_agent(model_id, provider):
 # --- SIDEBAR ---
 with st.sidebar:
     if is_guest:
-        st.info("👤 **Guest Mode**")
+        st.info("👤 **Guest Mode** (chats won't be saved)")
         if st.button("🔐 Log in / Sign up", use_container_width=True):
             st.session_state.user = None
             st.session_state.is_guest = False
@@ -425,8 +510,6 @@ with st.sidebar:
     else:
         st.success(f"👤 {user_name}")
         if st.button("🚪 Log out", use_container_width=True):
-            try: supabase.auth.sign_out()
-            except Exception: pass
             st.session_state.user = None
             st.session_state.is_guest = False
             st.session_state.active_session_id = None
