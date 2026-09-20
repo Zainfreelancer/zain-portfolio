@@ -11,7 +11,6 @@ import requests
 from supabase import create_client, Client
 from astronomy import Observer, SearchRiseSet, Direction, Body
 
-# Agent imports
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
@@ -35,21 +34,19 @@ if "uploader_key" not in st.session_state:
 
 # --- API KEYS ---
 OPENROUTER_KEY = st.secrets.get("OPENROUTER_API_KEY") or os.getenv("OPENROUTER_API_KEY")
-GROQ_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
-CEREBRAS_KEY = st.secrets.get("CEREBRAS_API_KEY") or os.getenv("CEREBRAS_API_KEY")
-TAVILY_KEY = st.secrets.get("TAVILY_API_KEY") or os.getenv("TAVILY_API_KEY")
-FIRECRAWL_KEY = st.secrets.get("FIRECRAWL_API_KEY") or os.getenv("FIRECRAWL_API_KEY")
-IPGEO_KEY = st.secrets.get("IPGEOLOCATION_API_KEY") or os.getenv("IPGEOLOCATION_API_KEY")
-SUPABASE_URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
+GROQ_KEY       = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+TAVILY_KEY     = st.secrets.get("TAVILY_API_KEY") or os.getenv("TAVILY_API_KEY")
+FIRECRAWL_KEY  = st.secrets.get("FIRECRAWL_API_KEY") or os.getenv("FIRECRAWL_API_KEY")
+IPGEO_KEY      = st.secrets.get("IPGEOLOCATION_API_KEY") or os.getenv("IPGEOLOCATION_API_KEY")
+SUPABASE_URL   = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_DB_URL = st.secrets.get("SUPABASE_DB_URL") or os.getenv("SUPABASE_DB_URL")
-APP_URL = st.secrets.get("APP_URL", "https://your-app.streamlit.app")
 
 # --- WORKSPACE DIRECTORY ---
 WORKSPACE = "agent_workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
-# --- PERSISTENT CHECKPOINTER (Postgres-backed, survives reboots) ---
+# --- PERSISTENT CHECKPOINTER ---
 @st.cache_resource
 def get_checkpointer():
     try:
@@ -60,7 +57,7 @@ def get_checkpointer():
             kwargs={"autocommit": True, "prepare_threshold": 0},
         )
         checkpointer = PostgresSaver(pool)
-        checkpointer.setup()  # Creates the checkpoint tables automatically
+        checkpointer.setup()
         return checkpointer
     except Exception as e:
         st.error(f"Checkpointer failed to initialize: {e}")
@@ -68,95 +65,158 @@ def get_checkpointer():
 
 checkpointer = get_checkpointer()
 
-# --- SUPABASE CLIENT (for auth + chat history) ---
+# --- SUPABASE CLIENT ---
 @st.cache_resource
 def init_supabase() -> Client:
-    if not SUPABASE_URL or not SUPABASE_KEY:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
         return None
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+    return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+
 supabase = init_supabase()
+
+# --- AUTH HELPERS ---
+def username_to_email(username: str) -> str:
+    return f"{username.strip().lower()}@craftgpt.local"
 
 # --- AUTH GATE ---
 if "user" not in st.session_state:
     st.session_state.user = None
-if st.session_state.user is None and supabase:
-    try:
-        session = supabase.auth.get_session()
-        if session and session.user:
-            st.session_state.user = session.user
-    except Exception:
-        pass
+if "is_guest" not in st.session_state:
+    st.session_state.is_guest = False
 
-if st.session_state.user is None:
+if st.session_state.user is None and not st.session_state.is_guest:
     st.markdown("### 🔐 Welcome to CraftGPT")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🐙 Sign in with GitHub", use_container_width=True):
-            try:
-                res = supabase.auth.sign_in_with_oauth({"provider": "github", "options": {"redirect_to": APP_URL}})
-                st.markdown(f'<meta http-equiv="refresh" content="0; url={res.url}">', unsafe_allow_html=True)
-            except Exception as e:
-                st.error(f"GitHub login failed: {e}")
-    with col2:
-        st.markdown("**Or use email:**")
-    with st.form("magic_link_form"):
-        email = st.text_input("📧 Gmail address:", placeholder="yourname@gmail.com")
-        if st.form_submit_button("✉️ Send Magic Link", use_container_width=True):
-            if not email.lower().endswith("@gmail.com"):
-                st.error("❌ Only Gmail addresses are allowed.")
-            else:
-                try:
-                    supabase.auth.sign_in_with_otp({"email": email, "options": {"email_redirect_to": APP_URL}})
-                    st.success(f"✅ Magic link sent to **{email}**.")
-                except Exception as e:
-                    st.error(f"Failed to send link: {e}")
+
+    if not supabase:
+        st.error("❌ Supabase not configured. Check secrets.")
+        st.stop()
+
+    tab_login, tab_signup = st.tabs(["🔐 Login", "📝 Sign Up"])
+
+    with tab_login:
+        with st.form("login_form"):
+            login_user = st.text_input("Username", placeholder="yourname")
+            login_pwd = st.text_input("Password", type="password")
+            if st.form_submit_button("Login", use_container_width=True):
+                if not login_user or not login_pwd:
+                    st.error("Enter both username and password.")
+                else:
+                    try:
+                        res = supabase.auth.sign_in_with_password({
+                            "email": username_to_email(login_user),
+                            "password": login_pwd,
+                        })
+                        if res.user:
+                            st.session_state.user = res.user
+                            st.session_state.is_guest = False
+                            st.rerun()
+                        else:
+                            st.error("❌ Invalid username or password.")
+                    except Exception:
+                        st.error("❌ Invalid username or password.")
+
+    with tab_signup:
+        with st.form("signup_form"):
+            new_user = st.text_input("Choose username", placeholder="yourname")
+            new_pwd = st.text_input("Password (min 6 chars)", type="password")
+            new_pwd2 = st.text_input("Confirm password", type="password")
+            if st.form_submit_button("Create account", use_container_width=True):
+                if not new_user or not new_pwd:
+                    st.error("Fill in both fields.")
+                elif new_pwd != new_pwd2:
+                    st.error("❌ Passwords don't match.")
+                elif len(new_pwd) < 6:
+                    st.error("❌ Password must be 6+ characters.")
+                else:
+                    try:
+                        res = supabase.auth.sign_up({
+                            "email": username_to_email(new_user),
+                            "password": new_pwd,
+                        })
+                        if res.user:
+                            # Insert profile row using the newly-authenticated session
+                            try:
+                                supabase.table("profiles").insert({
+                                    "id": res.user.id,
+                                    "username": new_user.strip().lower(),
+                                }).execute()
+                            except Exception as e:
+                                st.warning(f"Profile row: {e}")
+                            st.success("✅ Account created! Switch to Login tab and sign in.")
+                        else:
+                            st.error("❌ Sign up failed.")
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
     st.divider()
     if st.button("👤 Continue as Guest", use_container_width=True):
-        try:
-            guest = supabase.auth.sign_in_anonymously()
-            st.session_state.user = guest.user
-            st.rerun()
-        except Exception as e:
-            st.error(f"Guest login failed: {e}")
+        st.session_state.is_guest = True
+        st.session_state.user = None
+        st.rerun()
     st.stop()
 
-user_id = st.session_state.user.id
-user_email = getattr(st.session_state.user, "email", None)
-is_guest = user_email is None or getattr(st.session_state.user, "is_anonymous", False)
+# --- AUTH SUCCESS PATH ---
+is_guest = st.session_state.is_guest
+user_id = st.session_state.user.id if st.session_state.user else None
+user_name = "guest"
+if not is_guest and user_id:
+    try:
+        prof = supabase.table("profiles").select("username").eq("id", user_id).execute()
+        if prof.data:
+            user_name = prof.data[0]["username"]
+    except Exception:
+        user_name = "user"
 
 # --- DATABASE HELPERS ---
 def load_sessions():
-    if not supabase: return []
-    try: return supabase.table("chat_sessions").select("*").eq("user_id", user_id).order("created_at", desc=True).execute().data
-    except Exception: return []
+    if is_guest or not user_id: return []
+    try:
+        return supabase.table("chat_sessions").select("*").eq("user_id", user_id).order("created_at", desc=True).execute().data
+    except Exception:
+        return []
+
 def create_session(name):
-    if not supabase: return None
+    if is_guest or not user_id: return None
     try:
         r = supabase.table("chat_sessions").insert({"session_name": name, "user_id": user_id}).execute()
         return r.data[0] if r.data else None
-    except Exception: return None
+    except Exception:
+        return None
+
 def delete_session(sid):
-    if supabase:
+    if is_guest or not user_id: return
+    try:
+        supabase.table("chat_messages").delete().eq("session_id", sid).eq("user_id", user_id).execute()
         supabase.table("chat_sessions").delete().eq("id", sid).eq("user_id", user_id).execute()
+    except Exception:
+        pass
+
 def load_messages(sid):
-    if not supabase: return []
-    try: return supabase.table("chat_messages").select("*").eq("session_id", sid).eq("user_id", user_id).order("created_at").execute().data
-    except Exception: return []
+    if is_guest or not user_id or not sid: return []
+    try:
+        return supabase.table("chat_messages").select("*").eq("session_id", sid).eq("user_id", user_id).order("created_at").execute().data
+    except Exception:
+        return []
+
 def save_message(sid, role, content):
-    if supabase: supabase.table("chat_messages").insert({"session_id": sid, "user_id": user_id, "role": role, "content": content}).execute()
-def delete_all_guest_data():
-    if supabase and user_id:
-        try:
-            supabase.table("chat_messages").delete().eq("user_id", user_id).execute()
-            supabase.table("chat_sessions").delete().eq("user_id", user_id).execute()
-        except Exception: pass
+    if is_guest or not user_id or not sid: return
+    try:
+        supabase.table("chat_messages").insert({
+            "session_id": sid, "user_id": user_id, "role": role, "content": content
+        }).execute()
+    except Exception:
+        pass
 
 if "active_session_id" not in st.session_state:
-    sessions = load_sessions()
-    if sessions: st.session_state.active_session_id = sessions[0]["id"]
+    if is_guest:
+        st.session_state.active_session_id = None
     else:
-        new = create_session("Chat 1")
-        st.session_state.active_session_id = new["id"] if new else None
+        sessions = load_sessions()
+        if sessions:
+            st.session_state.active_session_id = sessions[0]["id"]
+        else:
+            new = create_session("Chat 1")
+            st.session_state.active_session_id = new["id"] if new else None
 
 # --- TOOL FUNCTIONS ---
 def tavily_search(query):
@@ -294,10 +354,15 @@ def planet_riseset(planet: str) -> str:
 # --- SUB-AGENT ---
 def create_research_subagent():
     try:
-        sub_model = ChatOpenAI(model="inclusionai/ling-3.0-flash-vl:free",
-            base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY, temperature=0.1)
+        sub_model = ChatOpenAI(
+            model="llama-3.1-8b-instant",
+            base_url="https://api.groq.com/openai/v1",
+            api_key=GROQ_KEY,
+            temperature=0.1,
+        )
         return create_react_agent(sub_model, [internet_search, deep_scrape])
-    except Exception: return None
+    except Exception:
+        return None
 
 @tool
 def delegate_research(query: str) -> str:
@@ -313,58 +378,88 @@ agent_tools = [internet_search, deep_scrape, astronomy_data, planet_riseset,
                run_python, read_file, write_file, edit_file, list_files, delegate_research]
 
 # --- AGENT BUILDER ---
+FALLBACK_CHAIN = [
+    ("groq",       "llama-3.3-70b-versatile"),
+    ("groq",       "llama-3.1-8b-instant"),
+    ("openrouter", "inclusionai/ling-3.0-flash-vl:free"),
+]
+
+def _make_model(provider, model_id):
+    if provider == "groq":
+        if not GROQ_KEY:
+            raise RuntimeError("GROQ_API_KEY missing in secrets.")
+        return ChatOpenAI(model=model_id, base_url="https://api.groq.com/openai/v1",
+                          api_key=GROQ_KEY, temperature=0.1)
+    if provider == "openrouter":
+        if not OPENROUTER_KEY:
+            raise RuntimeError("OPENROUTER_API_KEY missing in secrets.")
+        return ChatOpenAI(model=model_id, base_url="https://openrouter.ai/api/v1",
+                          api_key=OPENROUTER_KEY, temperature=0.1)
+    raise RuntimeError(f"Unknown provider: {provider}")
+
 def build_agent(model_id, provider):
-    if provider == "cerebras":
-        model = ChatOpenAI(model=model_id, base_url="https://api.cerebras.ai/v1", api_key=CEREBRAS_KEY, temperature=0.1)
-    elif provider == "groq":
-        model = ChatOpenAI(model=model_id, base_url="https://api.groq.com/openai/v1", api_key=GROQ_KEY, temperature=0.1)
-    else:
-        model = ChatOpenAI(model=model_id, base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY, temperature=0.1)
-    return create_react_agent(model, agent_tools, checkpointer=checkpointer)
+    attempts = [(provider, model_id)] + [x for x in FALLBACK_CHAIN if x != (provider, model_id)]
+    last_err = None
+    for prov, mid in attempts:
+        try:
+            model = _make_model(prov, mid)
+            agent = create_react_agent(model, agent_tools, checkpointer=checkpointer)
+            if (prov, mid) != (provider, model_id):
+                st.info(f"⚠️ Fallback in use: **{mid}** ({prov})")
+            return agent
+        except Exception as e:
+            last_err = e
+            continue
+    raise RuntimeError(f"All models failed. Last error: {last_err}")
 
 # --- SIDEBAR ---
 with st.sidebar:
     if is_guest:
         st.info("👤 **Guest Mode**")
-        if st.button("🔐 Sign in to save chats", use_container_width=True):
-            delete_all_guest_data()
-            try: supabase.auth.sign_out()
-            except Exception: pass
-            st.session_state.user = None; st.session_state.active_session_id = None; st.rerun()
+        if st.button("🔐 Log in / Sign up", use_container_width=True):
+            st.session_state.user = None
+            st.session_state.is_guest = False
+            st.session_state.active_session_id = None
+            st.rerun()
     else:
-        st.success(f"👤 {user_email}")
+        st.success(f"👤 {user_name}")
         if st.button("🚪 Log out", use_container_width=True):
             try: supabase.auth.sign_out()
             except Exception: pass
-            st.session_state.user = None; st.session_state.active_session_id = None; st.rerun()
+            st.session_state.user = None
+            st.session_state.is_guest = False
+            st.session_state.active_session_id = None
+            st.rerun()
     st.divider()
-    st.header("💬 Chat Sessions")
-    if st.button("➕ New Chat", use_container_width=True):
-        sessions = load_sessions(); existing = [s["session_name"] for s in sessions]; i = 1
-        while f"Chat {i}" in existing: i += 1
-        new = create_session(f"Chat {i}")
-        if new: st.session_state.active_session_id = new["id"]
-        st.rerun()
-    for s in load_sessions():
-        col1, col2 = st.columns([4, 1])
-        with col1:
-            is_active = s["id"] == st.session_state.active_session_id
-            label = f"🟢 {s['session_name']}" if is_active else f"⚪ {s['session_name']}"
-            if st.button(label, key=f"sel_{s['id']}", use_container_width=True):
-                st.session_state.active_session_id = s["id"]; st.rerun()
-        with col2:
-            if len(load_sessions()) > 1 and st.button("🗑️", key=f"del_{s['id']}"):
-                delete_session(s["id"]); remaining = [x for x in load_sessions() if x["id"] != s["id"]]
-                if remaining: st.session_state.active_session_id = remaining[0]["id"]
-                st.rerun()
-    st.divider()
+
+    if not is_guest:
+        st.header("💬 Chat Sessions")
+        if st.button("➕ New Chat", use_container_width=True):
+            sessions = load_sessions(); existing = [s["session_name"] for s in sessions]; i = 1
+            while f"Chat {i}" in existing: i += 1
+            new = create_session(f"Chat {i}")
+            if new: st.session_state.active_session_id = new["id"]
+            st.rerun()
+        for s in load_sessions():
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                is_active = s["id"] == st.session_state.active_session_id
+                label = f"🟢 {s['session_name']}" if is_active else f"⚪ {s['session_name']}"
+                if st.button(label, key=f"sel_{s['id']}", use_container_width=True):
+                    st.session_state.active_session_id = s["id"]; st.rerun()
+            with col2:
+                if len(load_sessions()) > 1 and st.button("🗑️", key=f"del_{s['id']}"):
+                    delete_session(s["id"]); remaining = [x for x in load_sessions() if x["id"] != s["id"]]
+                    if remaining: st.session_state.active_session_id = remaining[0]["id"]
+                    st.rerun()
+        st.divider()
+
     st.header("⚙️ Configuration")
     model_mapping = {
-        "🖼️ Ling 3.0 Flash VL (Vision + Agent)": {"id": "inclusionai/ling-3.0-flash-vl:free", "provider": "openrouter"},
-        "🚀 Gemma 4 31B (Vision + Agent)": {"id": "google/gemma-4-31b-it:free", "provider": "openrouter"},
-        "🧠 Nemotron 3 Super (Deep Reasoning)": {"id": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter"},
-        "💻 North Mini Code (Agentic Coding)": {"id": "cohere/north-mini-code:free", "provider": "openrouter"},
-        "⚡ Cerebras GPT OSS 120B (Fast Agent)": {"id": "gpt-oss-120b", "provider": "cerebras"},
+        "⚡ Groq Llama 3.3 70B (Fast + Free)":    {"id": "llama-3.3-70b-versatile",              "provider": "groq"},
+        "💨 Groq Llama 3.1 8B (Fastest + Free)":  {"id": "llama-3.1-8b-instant",                 "provider": "groq"},
+        "🖼️ Ling 3.0 Flash VL (Vision, Free)":    {"id": "inclusionai/ling-3.0-flash-vl:free",   "provider": "openrouter"},
+        "🚀 Gemma 2 9B (Free)":                    {"id": "google/gemma-2-9b-it:free",            "provider": "openrouter"},
     }
     selected_model_name = st.selectbox("Choose Agent Brain:", options=list(model_mapping.keys()), index=0)
     selected_model_id = model_mapping[selected_model_name]["id"]
@@ -373,7 +468,7 @@ with st.sidebar:
         key=f"homework_file_{st.session_state.uploader_key}")
 
 # --- RENDER CHAT HISTORY ---
-if st.session_state.active_session_id:
+if not is_guest and st.session_state.active_session_id:
     for msg in load_messages(st.session_state.active_session_id):
         with st.chat_message(msg["role"], avatar=msg["role"]):
             st.write(msg["content"])
@@ -389,20 +484,25 @@ if uploaded_file:
 
 # --- AGENT CHAT ---
 if prompt := st.chat_input("Ask CraftGPT..."):
-    save_message(st.session_state.active_session_id, "user", prompt)
+    if not is_guest and st.session_state.active_session_id:
+        save_message(st.session_state.active_session_id, "user", prompt)
     with st.chat_message("user", avatar="user"):
         st.write(prompt)
     with st.chat_message("assistant", avatar="assistant"):
-        if not OPENROUTER_KEY:
-            st.error("No OpenRouter API key configured.")
+        if not (GROQ_KEY or OPENROUTER_KEY):
+            st.error("No API key configured. Add GROQ_API_KEY or OPENROUTER_API_KEY to secrets.")
         else:
             provider = model_mapping[selected_model_name]["provider"]
-            agent = build_agent(selected_model_id, provider)
+            try:
+                agent = build_agent(selected_model_id, provider)
+            except Exception as e:
+                st.error(f"Could not initialize agent: {e}")
+                st.stop()
             handler = StreamlitLanggraphHandler(container=st.container(),
                 expand_new_thoughts=True, show_tool_calls=True, show_tool_results=True)
             vision_models = ["inclusionai/ling-3.0-flash-vl:free"]
             if img_base64 and selected_model_id not in vision_models:
-                st.warning("⚠️ The selected model is text-only. Switch to **Ling 3.0 Flash VL** to analyze images.")
+                st.warning("⚠️ This model is text-only. Switch to **Ling 3.0 Flash VL** to analyze images.")
             try:
                 if img_base64:
                     user_message = {"role": "user", "content": [
@@ -411,10 +511,12 @@ if prompt := st.chat_input("Ask CraftGPT..."):
                     ]}
                 else:
                     user_message = {"role": "user", "content": prompt}
+                thread_key = f"{user_id or 'guest'}-{st.session_state.active_session_id or 'guest'}"
                 response = handler.invoke(agent=agent, input={"messages": [user_message]},
-                    config={"configurable": {"thread_id": str(st.session_state.active_session_id)}})
+                    config={"configurable": {"thread_id": thread_key}})
                 st.write(response)
-                save_message(st.session_state.active_session_id, "assistant", response)
+                if not is_guest and st.session_state.active_session_id:
+                    save_message(st.session_state.active_session_id, "assistant", response)
                 if img_base64: st.session_state.uploader_key += 1
                 st.rerun()
             except Exception as exc:
