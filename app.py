@@ -76,7 +76,8 @@ supabase = init_supabase()
 
 # --- AUTH HELPERS ---
 def username_to_email(username: str) -> str:
-    return f"{username.strip().lower()}@craftgpt.local"
+    # Using a .com domain to pass Supabase's email format validator
+    return f"{username.strip().lower()}@craftgpt-auth.com"
 
 # --- AUTH GATE ---
 if "user" not in st.session_state:
