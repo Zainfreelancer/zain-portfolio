@@ -441,7 +441,7 @@ def planet_riseset(planet: str) -> str:
 def create_research_subagent():
     try:
         sub_model = ChatOpenAI(
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             base_url="https://api.groq.com/openai/v1",
             api_key=GROQ_KEY,
             temperature=0.1,
@@ -465,8 +465,8 @@ agent_tools = [internet_search, deep_scrape, astronomy_data, planet_riseset,
 
 # --- AGENT BUILDER ---
 FALLBACK_CHAIN = [
-    ("groq",       "llama-3.3-70b-versatile"),
-    ("groq",       "llama-3.1-8b-instant"),
+    ("groq",       "openai/gpt-oss-120b"),
+    ("groq",       "openai/gpt-oss-20b"),
     ("openrouter", "inclusionai/ling-3.0-flash-vl:free"),
 ]
 
@@ -540,10 +540,10 @@ with st.sidebar:
 
     st.header("⚙️ Configuration")
     model_mapping = {
-        "⚡ Groq Llama 3.3 70B (Fast + Free)":    {"id": "llama-3.3-70b-versatile",              "provider": "groq"},
-        "💨 Groq Llama 3.1 8B (Fastest + Free)":  {"id": "llama-3.1-8b-instant",                 "provider": "groq"},
+        "⚡ Groq GPT-OSS 120B (Fast + Free)":    {"id": "openai/gpt-oss-120b",              "provider": "groq"},
+        "💨 Groq GPT-OSS 20B (Fastest + Free)":  {"id": "openai/gpt-oss-20b",                 "provider": "groq"},
         "🖼️ Ling 3.0 Flash VL (Vision, Free)":    {"id": "inclusionai/ling-3.0-flash-vl:free",   "provider": "openrouter"},
-        "🚀 Gemma 2 9B (Free)":                    {"id": "google/gemma-2-9b-it:free",            "provider": "openrouter"},
+        "🚀 North Mini Code (Free)":               {"id": "cohere/north-mini-code:free",         "provider": "openrouter"},
     }
     selected_model_name = st.selectbox("Choose Agent Brain:", options=list(model_mapping.keys()), index=0)
     selected_model_id = model_mapping[selected_model_name]["id"]
