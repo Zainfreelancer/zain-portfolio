@@ -21,14 +21,194 @@ from youngjin_langchain_tools import StreamlitLanggraphHandler
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="CraftGPT Agent", page_icon="🚀", layout="centered")
+
+# --- META AI-INSPIRED CSS ---
 st.markdown("""
     <style>
-        .stApp { background-color: #131314 !important; color: #E3E3E3 !important; }
-        h1 { background: linear-gradient(45deg, #4285F4, #9B51E0); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800 !important; }
+        /* ===== Base ===== */
+        .stApp {
+            background-color: #000000 !important;
+            color: #E3E3E3 !important;
+        }
+        html, body, [class*="css"] {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                         Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* ===== Hide Streamlit chrome ===== */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {background: transparent !important;}
+
+        /* ===== Title ===== */
+        h1 {
+            background: linear-gradient(90deg, #A78BFA, #F472B6, #60A5FA);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 700 !important;
+            letter-spacing: -0.5px;
+        }
+        .caption, [data-testid="stCaptionContainer"] {
+            color: #888 !important;
+        }
+
+        /* ===== Sidebar ===== */
+        section[data-testid="stSidebar"] {
+            background-color: #0a0a0a !important;
+            border-right: 1px solid #1a1a1a;
+        }
+        section[data-testid="stSidebar"] * {
+            color: #E3E3E3 !important;
+        }
+
+        /* ===== Buttons (default + sidebar) ===== */
+        .stButton > button {
+            background-color: transparent !important;
+            color: #E3E3E3 !important;
+            border: 1px solid transparent !important;
+            border-radius: 10px !important;
+            text-align: left !important;
+            transition: background-color 0.15s ease, border-color 0.15s ease;
+            padding: 8px 12px !important;
+        }
+        .stButton > button:hover {
+            background-color: #1a1a1a !important;
+            border-color: #2a2a2a !important;
+        }
+        .stButton > button:focus {
+            box-shadow: none !important;
+            border-color: #2a2a2a !important;
+        }
+        /* Sidebar-wide primary style for New Chat */
+        section[data-testid="stSidebar"] .stButton > button {
+            background-color: #141414 !important;
+            border: 1px solid #1f1f1f !important;
+        }
+        section[data-testid="stSidebar"] .stButton > button:hover {
+            background-color: #1f1f1f !important;
+        }
+
+        /* ===== Chat input ===== */
+        .stChatInput {
+            background-color: #141414 !important;
+            border: 1px solid #262626 !important;
+            border-radius: 26px !important;
+        }
+        .stChatInput textarea {
+            background-color: transparent !important;
+            color: #E3E3E3 !important;
+            padding: 12px 18px !important;
+            font-size: 15px !important;
+        }
+        .stChatInput textarea::placeholder {
+            color: #666 !important;
+        }
+
+        /* ===== Chat messages ===== */
+        [data-testid="stChatMessage"] {
+            background-color: transparent !important;
+            padding: 6px 0 !important;
+        }
+        /* User bubble right-aligned feel */
+        [data-testid="stChatMessage"] p {
+            color: #E3E3E3 !important;
+            font-size: 15px !important;
+            line-height: 1.55 !important;
+        }
+
+        /* ===== Download button (icon-like) ===== */
+        .stDownloadButton > button {
+            background-color: transparent !important;
+            color: #777 !important;
+            border: none !important;
+            border-radius: 8px !important;
+            padding: 4px 10px !important;
+            font-size: 13px !important;
+        }
+        .stDownloadButton > button:hover {
+            color: #E3E3E3 !important;
+            background-color: #1a1a1a !important;
+        }
+
+        /* ===== Inputs (login forms etc.) ===== */
+        .stTextInput input, .stTextArea textarea {
+            background-color: #141414 !important;
+            color: #E3E3E3 !important;
+            border: 1px solid #262626 !important;
+            border-radius: 10px !important;
+        }
+
+        /* ===== Selectbox ===== */
+        div[data-baseweb="select"] > div {
+            background-color: #141414 !important;
+            border: 1px solid #262626 !important;
+            border-radius: 10px !important;
+        }
+
+        /* ===== Tabs ===== */
+        .stTabs [data-baseweb="tab"] {
+            color: #888 !important;
+        }
+        .stTabs [aria-selected="true"] {
+            color: #E3E3E3 !important;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 8px;
+            border-bottom: 1px solid #1f1f1f;
+        }
+
+        /* ===== Divider ===== */
+        hr {
+            border-color: #1f1f1f !important;
+        }
+
+        /* ===== Scrollbar ===== */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #222; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #333; }
+
+        /* ===== Top-right model badge ===== */
+        .model-badge {
+            display: inline-block;
+            background: #141414;
+            color: #aaa;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            border: 1px solid #262626;
+            float: right;
+        }
+
+        /* ===== Sidebar section labels ===== */
+        .sidebar-label {
+            font-size: 11px;
+            color: #666 !important;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 12px 0 6px 0;
+            font-weight: 600;
+        }
     </style>
 """, unsafe_allow_html=True)
-st.title("🚀 CraftGPT Agent")
-st.caption("Autonomous Homework Agent | Tier 3 Codex-Style")
+
+# --- SPARKLE AVATAR (Meta AI-style gradient) ---
+SPARKLE_AVATAR = (
+    "data:image/svg+xml;utf8,"
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+    "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>"
+    "<stop offset='0' stop-color='%23A78BFA'/>"
+    "<stop offset='0.5' stop-color='%23F472B6'/>"
+    "<stop offset='1' stop-color='%2360A5FA'/>"
+    "</linearGradient></defs>"
+    "<path fill='url(%23g)' d='M16 3l1.8 8.2L26 13l-8.2 1.8L16 23l-1.8-8.2L6 13l8.2-1.8z'/>"
+    "<circle fill='url(%23g)' cx='25' cy='6' r='2'/>"
+    "<circle fill='url(%23g)' cx='6' cy='24' r='2'/>"
+    "</svg>"
+)
+
+# --- HEADER ---
+st.title("CraftGPT Agent")
 
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
@@ -170,15 +350,15 @@ if "guest_thread_id" not in st.session_state:
     st.session_state.guest_thread_id = str(uuid.uuid4())
 
 if st.session_state.user is None and not st.session_state.is_guest:
-    st.markdown("### 🔐 Welcome to CraftGPT")
+    st.markdown("### Welcome to CraftGPT")
 
     if not supabase:
-        st.error("❌ Supabase not configured. Check secrets.")
+        st.error("Supabase not configured. Check secrets.")
         st.stop()
 
     # --- FORGOT PASSWORD ---
     if st.session_state.show_reset:
-        st.markdown("#### 🔄 Reset Your Password")
+        st.markdown("#### Reset Your Password")
         with st.form("reset_form"):
             r_user = st.text_input("Username")
             r_code = st.text_input("Recovery code", placeholder="XXXX-XXXX-XXXX")
@@ -191,21 +371,21 @@ if st.session_state.user is None and not st.session_state.is_guest:
                 back = st.form_submit_button("← Back to Login", use_container_width=True)
             if do_reset:
                 if r_new1 != r_new2:
-                    st.error("❌ Passwords don't match.")
+                    st.error("Passwords don't match.")
                 else:
                     ok, msg = reset_password(r_user, r_code, r_new1)
                     if ok:
-                        st.success("✅ " + msg + " You can now log in.")
+                        st.success(msg + " You can now log in.")
                         st.session_state.show_reset = False
                     else:
-                        st.error("❌ " + msg)
+                        st.error(msg)
             if back:
                 st.session_state.show_reset = False
                 st.rerun()
         st.stop()
 
     # --- LOGIN / SIGNUP ---
-    tab_login, tab_signup = st.tabs(["🔐 Login", "📝 Sign Up"])
+    tab_login, tab_signup = st.tabs(["Login", "Sign Up"])
 
     with tab_login:
         with st.form("login_form"):
@@ -216,11 +396,11 @@ if st.session_state.user is None and not st.session_state.is_guest:
                 if user:
                     st.session_state.user = user
                     st.session_state.is_guest = False
-                    st.session_state.guest_messages = []   # discard guest data
+                    st.session_state.guest_messages = []
                     st.session_state.active_session_id = None
                     st.rerun()
                 else:
-                    st.error("❌ Invalid username or password.")
+                    st.error("Invalid username or password.")
 
     with tab_signup:
         with st.form("signup_form"):
@@ -230,18 +410,17 @@ if st.session_state.user is None and not st.session_state.is_guest:
             new_pwd2 = st.text_input("Confirm password", type="password")
             if st.form_submit_button("Create account", use_container_width=True):
                 if new_pwd != new_pwd2:
-                    st.error("❌ Passwords don't match.")
+                    st.error("Passwords don't match.")
                 else:
                     ok, result = sign_up(new_user, new_pwd, new_email)
                     if ok:
-                        st.success("✅ Account created!")
+                        st.success("Account created!")
                         st.warning(
-                            f"### 🔑 SAVE THIS RECOVERY CODE\n\n"
+                            f"### SAVE THIS RECOVERY CODE\n\n"
                             f"## `{result}`\n\n"
                             "**Write it down right now.** You'll need it if you forget your password. "
                             "It will **never** be shown again."
                         )
-                        # Auto-login (no guest import)
                         user = log_in(new_user, new_pwd)
                         if user:
                             st.session_state.user = user
@@ -250,16 +429,16 @@ if st.session_state.user is None and not st.session_state.is_guest:
                             st.session_state.active_session_id = None
                             st.rerun()
                     else:
-                        st.error(f"❌ {result}")
+                        st.error(result)
 
     st.divider()
     col_a, col_b = st.columns(2)
     with col_a:
-        if st.button("🔄 Forgot Password", use_container_width=True):
+        if st.button("Forgot Password", use_container_width=True):
             st.session_state.show_reset = True
             st.rerun()
     with col_b:
-        if st.button("🎮 Continue as Guest", use_container_width=True):
+        if st.button("Continue as Guest", use_container_width=True):
             st.session_state.is_guest = True
             st.session_state.user = None
             st.rerun()
@@ -311,7 +490,6 @@ def save_message(sid, role, content):
         pass
 
 def update_session_title(sid, new_title):
-    """Rename a chat session."""
     if is_guest or not user_id or not sid:
         return
     try:
@@ -322,7 +500,6 @@ def update_session_title(sid, new_title):
         pass
 
 def generate_session_title(first_message: str) -> str:
-    """Ask a fast LLM to summarize the first user message into a 3-5 word title."""
     try:
         model = ChatOpenAI(
             model="openai/gpt-oss-20b",
@@ -382,9 +559,9 @@ def get_astronomy(location="Islamabad,PK"):
         r = requests.get("https://api.ipgeolocation.io/v3/astronomy",
             params={"apiKey": IPGEO_KEY, "location": location, "date": today}, timeout=15); r.raise_for_status()
         data = r.json(); astro = data.get("astronomy", {}); sun, moon = astro.get("sun", {}), astro.get("moon", {}); out = []
-        for k, l in [("sunrise","☀️ Sunrise"),("sunset","🌇 Sunset"),("solar_noon","🕛 Solar Noon"),("day_length","⏱️ Day Length")]:
+        for k, l in [("sunrise","Sunrise"),("sunset","Sunset"),("solar_noon","Solar Noon"),("day_length","Day Length")]:
             if sun.get(k): out.append(f"{l}: {sun[k]}")
-        for k, l in [("moonrise","🌙 Moonrise"),("moonset","🌙 Moonset"),("phase","🌒 Moon Phase")]:
+        for k, l in [("moonrise","Moonrise"),("moonset","Moonset"),("phase","Moon Phase")]:
             if moon.get(k): out.append(f"{l}: {moon[k]}")
         return "\n".join(out) or "No astronomy data."
     except Exception as e: return f"Astronomy failed: {e}"
@@ -414,9 +591,9 @@ def run_python(code: str) -> str:
             f.write(code)
             temp_file = f.name
         result = subprocess.run([sys.executable, temp_file], capture_output=True, text=True, timeout=20)
-        return f"✅ Success:\n{result.stdout}" if result.returncode == 0 else f"❌ Error:\n{result.stderr}"
+        return f"Success:\n{result.stdout}" if result.returncode == 0 else f"Error:\n{result.stderr}"
     except subprocess.TimeoutExpired:
-        return "⏱️ Execution timed out after 20 seconds."
+        return "Execution timed out after 20 seconds."
     except Exception as e:
         return f"Execution failed: {e}"
     finally:
@@ -440,7 +617,7 @@ def write_file(path: str, content: str) -> str:
     safe_path = os.path.join(WORKSPACE, os.path.basename(path))
     try:
         with open(safe_path, 'w') as f: f.write(content)
-        return f"✅ Successfully wrote {len(content)} chars to {path}"
+        return f"Successfully wrote {len(content)} chars to {path}"
     except Exception as e: return f"Error writing file: {e}"
 
 @tool
@@ -449,9 +626,9 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
     safe_path = os.path.join(WORKSPACE, os.path.basename(path))
     try:
         with open(safe_path, 'r') as f: content = f.read()
-        if old_text not in content: return f"❌ Error: text not found in {path}"
+        if old_text not in content: return f"Error: text not found in {path}"
         with open(safe_path, 'w') as f: f.write(content.replace(old_text, new_text, 1))
-        return f"✅ Successfully edited {path}"
+        return f"Successfully edited {path}"
     except FileNotFoundError: return f"File not found: {path}"
     except Exception as e: return f"Error editing file: {e}"
 
@@ -538,7 +715,7 @@ def build_agent(model_id, provider):
             model = _make_model(prov, mid)
             agent = create_react_agent(model, agent_tools, checkpointer=checkpointer)
             if (prov, mid) != (provider, model_id):
-                st.info(f"⚠️ Fallback in use: **{mid}** ({prov})")
+                st.info(f"Fallback in use: **{mid}** ({prov})")
             return agent
         except Exception as e:
             last_err = e
@@ -547,76 +724,114 @@ def build_agent(model_id, provider):
 
 # --- SIDEBAR ---
 with st.sidebar:
+    # User chip at top
     if is_guest:
-        st.info("👤 **Guest Mode** (chats kept this session only)")
-        if st.button("🔐 Log in / Sign up", use_container_width=True):
+        st.markdown(
+            f"<div style='padding:10px 12px;border-radius:10px;"
+            f"background:#141414;border:1px solid #1f1f1f;color:#aaa;"
+            f"font-size:13px;'>👤 Guest Mode</div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Log in / Sign up", use_container_width=True):
             st.session_state.user = None
             st.session_state.is_guest = False
             st.session_state.active_session_id = None
             st.rerun()
     else:
-        st.success(f"👤 {user_name}")
-        if st.button("🚪 Log out", use_container_width=True):
+        st.markdown(
+            f"<div style='padding:10px 12px;border-radius:10px;"
+            f"background:#141414;border:1px solid #1f1f1f;color:#E3E3E3;"
+            f"font-size:13px;'>👤 {user_name}</div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Log out", use_container_width=True):
             st.session_state.user = None
             st.session_state.is_guest = False
             st.session_state.active_session_id = None
             st.rerun()
-    st.divider()
 
+    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+
+    # --- New Chat (Meta AI-style row) ---
     if not is_guest:
-        st.header("💬 Chat Sessions")
-        if st.button("➕ New Chat", use_container_width=True):
+        if st.button("✎  New chat", use_container_width=True):
             new = create_session("New Chat")
             if new: st.session_state.active_session_id = new["id"]
             st.rerun()
-        for s in load_sessions():
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                is_active = s["id"] == st.session_state.active_session_id
-                label = f"🟢 {s['session_name']}" if is_active else f"⚪ {s['session_name']}"
-                if st.button(label, key=f"sel_{s['id']}", use_container_width=True):
-                    st.session_state.active_session_id = s["id"]; st.rerun()
-            with col2:
-                if len(load_sessions()) > 1 and st.button("🗑️", key=f"del_{s['id']}"):
-                    delete_session(s["id"]); remaining = [x for x in load_sessions() if x["id"] != s["id"]]
-                    if remaining: st.session_state.active_session_id = remaining[0]["id"]
-                    st.rerun()
-        st.divider()
+
+        # --- History label ---
+        st.markdown("<div class='sidebar-label'>History</div>", unsafe_allow_html=True)
+
+        # --- Flat history list ---
+        sessions = load_sessions()
+        for s in sessions:
+            is_active = s["id"] == st.session_state.active_session_id
+            # Active gets a subtle highlight; inactive is plain
+            label = s["session_name"] if not is_active else f"● {s['session_name']}"
+            if st.button(label, key=f"sel_{s['id']}", use_container_width=True):
+                st.session_state.active_session_id = s["id"]
+                st.rerun()
+
+        # --- Delete for active session (moved to bottom, quieter) ---
+        if len(sessions) > 1:
+            with st.expander("Manage sessions"):
+                for s in sessions:
+                    cols = st.columns([4, 1])
+                    with cols[0]:
+                        st.caption(s["session_name"])
+                    with cols[1]:
+                        if st.button("🗑", key=f"del2_{s['id']}"):
+                            delete_session(s["id"])
+                            remaining = [x for x in load_sessions() if x["id"] != s["id"]]
+                            if remaining:
+                                st.session_state.active_session_id = remaining[0]["id"]
+                            st.rerun()
     else:
-        st.header("💬 Guest Chat")
-        if st.button("🧹 Clear Chat", use_container_width=True):
+        st.markdown("<div class='sidebar-label'>Guest Chat</div>", unsafe_allow_html=True)
+        if st.button("Clear chat", use_container_width=True):
             st.session_state.guest_messages = []
             st.session_state.guest_thread_id = str(uuid.uuid4())
             st.rerun()
-        st.divider()
 
-    st.header("⚙️ Configuration")
+    st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+
+    # --- Model picker ---
+    st.markdown("<div class='sidebar-label'>Model</div>", unsafe_allow_html=True)
     model_mapping = {
-        "⚡ Groq GPT-OSS 120B (Fast + Free)":    {"id": "openai/gpt-oss-120b",              "provider": "groq"},
-        "💨 Groq GPT-OSS 20B (Fastest + Free)":  {"id": "openai/gpt-oss-20b",                 "provider": "groq"},
-        "🖼️ Ling 3.0 Flash VL (Vision, Free)":    {"id": "inclusionai/ling-3.0-flash-vl:free",   "provider": "openrouter"},
-        "🚀 North Mini Code (Free)":               {"id": "cohere/north-mini-code:free",         "provider": "openrouter"},
+        "GPT-OSS 120B (Fast, Free)":    {"id": "openai/gpt-oss-120b",              "provider": "groq"},
+        "GPT-OSS 20B (Fastest, Free)":  {"id": "openai/gpt-oss-20b",                 "provider": "groq"},
+        "Ling 3.0 Flash VL (Vision)":   {"id": "inclusionai/ling-3.0-flash-vl:free",   "provider": "openrouter"},
+        "North Mini Code (Free)":       {"id": "cohere/north-mini-code:free",         "provider": "openrouter"},
     }
-    selected_model_name = st.selectbox("Choose Agent Brain:", options=list(model_mapping.keys()), index=0)
+    selected_model_name = st.selectbox("Choose Agent Brain:", options=list(model_mapping.keys()), index=0, label_visibility="collapsed")
     selected_model_id = model_mapping[selected_model_name]["id"]
-    st.header("📸 Media input panel")
-    uploaded_file = st.file_uploader("Snapshot your worksheet/page:", type=["jpg", "jpeg", "png"],
-        key=f"homework_file_{st.session_state.uploader_key}")
+
+    st.markdown("<div class='sidebar-label'>Media</div>", unsafe_allow_html=True)
+    uploaded_file = st.file_uploader("Snapshot your worksheet:", type=["jpg", "jpeg", "png"],
+        key=f"homework_file_{st.session_state.uploader_key}", label_visibility="collapsed")
+
+# --- TOP-RIGHT MODEL BADGE (Meta AI vibe) ---
+st.markdown(
+    f"<div class='model-badge'>{selected_model_name.split(' (')[0]}</div>",
+    unsafe_allow_html=True,
+)
 
 # --- RENDER CHAT HISTORY ---
 if is_guest:
     for i, msg in enumerate(st.session_state.guest_messages):
-        with st.chat_message(msg["role"], avatar=msg["role"]):
+        avatar = SPARKLE_AVATAR if msg["role"] == "assistant" else "👤"
+        with st.chat_message(msg["role"], avatar=avatar):
             st.write(msg["content"])
             if msg["role"] == "assistant":
-                st.download_button("📥 Download", data=msg["content"], file_name="solution.md",
+                st.download_button("Download", data=msg["content"], file_name="solution.md",
                     mime="text/markdown", key=f"dl_guest_{i}")
 elif st.session_state.active_session_id:
     for msg in load_messages(st.session_state.active_session_id):
-        with st.chat_message(msg["role"], avatar=msg["role"]):
+        avatar = SPARKLE_AVATAR if msg["role"] == "assistant" else "👤"
+        with st.chat_message(msg["role"], avatar=avatar):
             st.write(msg["content"])
             if msg["role"] == "assistant":
-                st.download_button("📥 Download", data=msg["content"], file_name="solution.md",
+                st.download_button("Download", data=msg["content"], file_name="solution.md",
                     mime="text/markdown", key=f"dl_{msg['id']}")
 
 # --- IMAGE PROCESSING ---
@@ -627,21 +842,19 @@ if uploaded_file:
 
 # --- AGENT CHAT ---
 if prompt := st.chat_input("Ask CraftGPT..."):
-    # Persist user message
     if is_guest:
         st.session_state.guest_messages.append({"role": "user", "content": prompt})
     elif st.session_state.active_session_id:
         save_message(st.session_state.active_session_id, "user", prompt)
 
-        # ── Auto-title the session on the FIRST message ──
         prior = load_messages(st.session_state.active_session_id)
-        if len(prior) == 1:  # just the one we saved above
+        if len(prior) == 1:
             new_title = generate_session_title(prompt)
             update_session_title(st.session_state.active_session_id, new_title)
 
-    with st.chat_message("user", avatar="user"):
+    with st.chat_message("user", avatar="👤"):
         st.write(prompt)
-    with st.chat_message("assistant", avatar="assistant"):
+    with st.chat_message("assistant", avatar=SPARKLE_AVATAR):
         if not (GROQ_KEY or OPENROUTER_KEY):
             st.error("No API key configured. Add GROQ_API_KEY or OPENROUTER_API_KEY to secrets.")
         else:
@@ -655,7 +868,7 @@ if prompt := st.chat_input("Ask CraftGPT..."):
                 expand_new_thoughts=True, show_tool_calls=True, show_tool_results=True)
             vision_models = ["inclusionai/ling-3.0-flash-vl:free"]
             if img_base64 and selected_model_id not in vision_models:
-                st.warning("⚠️ This model is text-only. Switch to **Ling 3.0 Flash VL** to analyze images.")
+                st.warning("This model is text-only. Switch to Ling 3.0 Flash VL to analyze images.")
             try:
                 if img_base64:
                     user_message = {"role": "user", "content": [
@@ -665,7 +878,6 @@ if prompt := st.chat_input("Ask CraftGPT..."):
                 else:
                     user_message = {"role": "user", "content": prompt}
 
-                # --- Thread isolation for guests ---
                 if is_guest:
                     thread_key = f"guest-{st.session_state.guest_thread_id}"
                 else:
@@ -675,7 +887,6 @@ if prompt := st.chat_input("Ask CraftGPT..."):
                     config={"configurable": {"thread_id": thread_key}})
                 st.write(response)
 
-                # Persist assistant message
                 if is_guest:
                     st.session_state.guest_messages.append({"role": "assistant", "content": response})
                 elif st.session_state.active_session_id:
