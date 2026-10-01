@@ -163,36 +163,11 @@ if "is_guest" not in st.session_state:
 if "show_reset" not in st.session_state:
     st.session_state.show_reset = False
 
-# --- GUEST STATE (must be initialized before auth gate for migration) ---
+# --- GUEST STATE ---
 if "guest_messages" not in st.session_state:
     st.session_state.guest_messages = []
 if "guest_thread_id" not in st.session_state:
     st.session_state.guest_thread_id = str(uuid.uuid4())
-
-def migrate_guest_messages_to_user(new_user_dict):
-    """After login/signup, copy guest_messages into a fresh DB session."""
-    guest_msgs = st.session_state.get("guest_messages", [])
-    st.session_state.user = new_user_dict
-    st.session_state.is_guest = False
-    if guest_msgs:
-        global user_id  # we'll re-set from session_state below anyway
-        # Temporarily set user_id so create_session/save_message work
-        uid = new_user_dict["id"]
-        try:
-            r = supabase.table("chat_sessions").insert(
-                {"session_name": "Imported from Guest", "user_id": uid}
-            ).execute()
-            if r.data:
-                sid = r.data[0]["id"]
-                for m in guest_msgs:
-                    supabase.table("chat_messages").insert({
-                        "session_id": sid, "user_id": uid,
-                        "role": m["role"], "content": m["content"]
-                    }).execute()
-                st.session_state.active_session_id = sid
-        except Exception:
-            pass
-    st.session_state.guest_messages = []
 
 if st.session_state.user is None and not st.session_state.is_guest:
     st.markdown("### 🔐 Welcome to CraftGPT")
@@ -239,7 +214,10 @@ if st.session_state.user is None and not st.session_state.is_guest:
             if st.form_submit_button("Login", use_container_width=True):
                 user = log_in(login_user, login_pwd)
                 if user:
-                    migrate_guest_messages_to_user(user)
+                    st.session_state.user = user
+                    st.session_state.is_guest = False
+                    st.session_state.guest_messages = []   # discard guest data
+                    st.session_state.active_session_id = None
                     st.rerun()
                 else:
                     st.error("❌ Invalid username or password.")
@@ -263,10 +241,13 @@ if st.session_state.user is None and not st.session_state.is_guest:
                             "**Write it down right now.** You'll need it if you forget your password. "
                             "It will **never** be shown again."
                         )
-                        # Auto-login the new user so guest messages carry over
+                        # Auto-login (no guest import)
                         user = log_in(new_user, new_pwd)
                         if user:
-                            migrate_guest_messages_to_user(user)
+                            st.session_state.user = user
+                            st.session_state.is_guest = False
+                            st.session_state.guest_messages = []
+                            st.session_state.active_session_id = None
                             st.rerun()
                     else:
                         st.error(f"❌ {result}")
@@ -329,6 +310,36 @@ def save_message(sid, role, content):
     except Exception:
         pass
 
+def update_session_title(sid, new_title):
+    """Rename a chat session."""
+    if is_guest or not user_id or not sid:
+        return
+    try:
+        supabase.table("chat_sessions").update(
+            {"session_name": new_title}
+        ).eq("id", sid).eq("user_id", user_id).execute()
+    except Exception:
+        pass
+
+def generate_session_title(first_message: str) -> str:
+    """Ask a fast LLM to summarize the first user message into a 3-5 word title."""
+    try:
+        model = ChatOpenAI(
+            model="openai/gpt-oss-20b",
+            base_url="https://api.groq.com/openai/v1",
+            api_key=GROQ_KEY,
+            temperature=0.3,
+        )
+        resp = model.invoke(
+            "Generate a concise 3-5 word title for this conversation. "
+            "Return ONLY the title. No quotes, no trailing punctuation.\n\n"
+            f"First user message: {first_message[:500]}"
+        )
+        title = resp.content.strip().strip('"').strip("'").rstrip(".")
+        return title[:60] or first_message.strip()[:30] or "New Chat"
+    except Exception:
+        return first_message.strip()[:30] or "New Chat"
+
 if "active_session_id" not in st.session_state:
     if is_guest:
         st.session_state.active_session_id = None
@@ -337,7 +348,7 @@ if "active_session_id" not in st.session_state:
         if sessions:
             st.session_state.active_session_id = sessions[0]["id"]
         else:
-            new = create_session("Chat 1")
+            new = create_session("New Chat")
             st.session_state.active_session_id = new["id"] if new else None
 
 # --- TOOL FUNCTIONS ---
@@ -555,9 +566,7 @@ with st.sidebar:
     if not is_guest:
         st.header("💬 Chat Sessions")
         if st.button("➕ New Chat", use_container_width=True):
-            sessions = load_sessions(); existing = [s["session_name"] for s in sessions]; i = 1
-            while f"Chat {i}" in existing: i += 1
-            new = create_session(f"Chat {i}")
+            new = create_session("New Chat")
             if new: st.session_state.active_session_id = new["id"]
             st.rerun()
         for s in load_sessions():
@@ -574,7 +583,6 @@ with st.sidebar:
                     st.rerun()
         st.divider()
     else:
-        # Guest: show a "clear chat" button since they have no session list
         st.header("💬 Guest Chat")
         if st.button("🧹 Clear Chat", use_container_width=True):
             st.session_state.guest_messages = []
@@ -624,6 +632,12 @@ if prompt := st.chat_input("Ask CraftGPT..."):
         st.session_state.guest_messages.append({"role": "user", "content": prompt})
     elif st.session_state.active_session_id:
         save_message(st.session_state.active_session_id, "user", prompt)
+
+        # ── Auto-title the session on the FIRST message ──
+        prior = load_messages(st.session_state.active_session_id)
+        if len(prior) == 1:  # just the one we saved above
+            new_title = generate_session_title(prompt)
+            update_session_title(st.session_state.active_session_id, new_title)
 
     with st.chat_message("user", avatar="user"):
         st.write(prompt)
