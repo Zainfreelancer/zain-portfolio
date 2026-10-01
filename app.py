@@ -4,6 +4,7 @@ import base64
 import subprocess
 import sys
 import uuid
+import secrets
 from datetime import datetime
 
 import streamlit as st
@@ -22,25 +23,21 @@ from youngjin_langchain_tools import StreamlitLanggraphHandler
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="CraftGPT Agent", page_icon="🚀", layout="centered")
 
-# --- META AI-INSPIRED CSS ---
+# --- SHARE CONFIG ---
+SHARE_BASE_URL = "https://zain-portfolio-n2syscmtkva6nf83ayk48j.streamlit.app"
+
+# --- META AI-INSPIRED GLOBAL CSS ---
 st.markdown("""
     <style>
-        /* ===== Base ===== */
-        .stApp {
-            background-color: #000000 !important;
-            color: #E3E3E3 !important;
-        }
+        .stApp { background-color: #000000 !important; color: #E3E3E3 !important; }
         html, body, [class*="css"] {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
                          Roboto, Helvetica, Arial, sans-serif;
         }
-
-        /* ===== Hide Streamlit chrome ===== */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         header {background: transparent !important;}
 
-        /* ===== Title ===== */
         h1 {
             background: linear-gradient(90deg, #A78BFA, #F472B6, #60A5FA);
             -webkit-background-clip: text;
@@ -48,20 +45,12 @@ st.markdown("""
             font-weight: 700 !important;
             letter-spacing: -0.5px;
         }
-        .caption, [data-testid="stCaptionContainer"] {
-            color: #888 !important;
-        }
-
-        /* ===== Sidebar ===== */
         section[data-testid="stSidebar"] {
             background-color: #0a0a0a !important;
             border-right: 1px solid #1a1a1a;
         }
-        section[data-testid="stSidebar"] * {
-            color: #E3E3E3 !important;
-        }
+        section[data-testid="stSidebar"] * { color: #E3E3E3 !important; }
 
-        /* ===== Buttons (default + sidebar) ===== */
         .stButton > button {
             background-color: transparent !important;
             color: #E3E3E3 !important;
@@ -79,16 +68,14 @@ st.markdown("""
             box-shadow: none !important;
             border-color: #2a2a2a !important;
         }
-        /* Sidebar-wide primary style for New Chat */
         section[data-testid="stSidebar"] .stButton > button {
-            background-color: #141414 !important;
-            border: 1px solid #1f1f1f !important;
+            background-color: transparent !important;
+            border: 1px solid transparent !important;
         }
         section[data-testid="stSidebar"] .stButton > button:hover {
-            background-color: #1f1f1f !important;
+            background-color: #1a1a1a !important;
         }
 
-        /* ===== Chat input ===== */
         .stChatInput {
             background-color: #141414 !important;
             border: 1px solid #262626 !important;
@@ -100,23 +87,18 @@ st.markdown("""
             padding: 12px 18px !important;
             font-size: 15px !important;
         }
-        .stChatInput textarea::placeholder {
-            color: #666 !important;
-        }
+        .stChatInput textarea::placeholder { color: #666 !important; }
 
-        /* ===== Chat messages ===== */
         [data-testid="stChatMessage"] {
             background-color: transparent !important;
             padding: 6px 0 !important;
         }
-        /* User bubble right-aligned feel */
         [data-testid="stChatMessage"] p {
             color: #E3E3E3 !important;
             font-size: 15px !important;
             line-height: 1.55 !important;
         }
 
-        /* ===== Download button (icon-like) ===== */
         .stDownloadButton > button {
             background-color: transparent !important;
             color: #777 !important;
@@ -130,45 +112,29 @@ st.markdown("""
             background-color: #1a1a1a !important;
         }
 
-        /* ===== Inputs (login forms etc.) ===== */
         .stTextInput input, .stTextArea textarea {
             background-color: #141414 !important;
             color: #E3E3E3 !important;
             border: 1px solid #262626 !important;
             border-radius: 10px !important;
         }
-
-        /* ===== Selectbox ===== */
         div[data-baseweb="select"] > div {
             background-color: #141414 !important;
             border: 1px solid #262626 !important;
             border-radius: 10px !important;
         }
-
-        /* ===== Tabs ===== */
-        .stTabs [data-baseweb="tab"] {
-            color: #888 !important;
-        }
-        .stTabs [aria-selected="true"] {
-            color: #E3E3E3 !important;
-        }
+        .stTabs [data-baseweb="tab"] { color: #888 !important; }
+        .stTabs [aria-selected="true"] { color: #E3E3E3 !important; }
         .stTabs [data-baseweb="tab-list"] {
             gap: 8px;
             border-bottom: 1px solid #1f1f1f;
         }
-
-        /* ===== Divider ===== */
-        hr {
-            border-color: #1f1f1f !important;
-        }
-
-        /* ===== Scrollbar ===== */
+        hr { border-color: #1f1f1f !important; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #222; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #333; }
 
-        /* ===== Top-right model badge ===== */
         .model-badge {
             display: inline-block;
             background: #141414;
@@ -177,22 +143,74 @@ st.markdown("""
             border-radius: 20px;
             font-size: 12px;
             border: 1px solid #262626;
-            float: right;
         }
 
-        /* ===== Sidebar section labels ===== */
-        .sidebar-label {
+        .sb-label {
             font-size: 11px;
             color: #666 !important;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            margin: 12px 0 6px 0;
+            margin: 16px 0 6px 4px;
             font-weight: 600;
+        }
+        .account-chip {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            background: #141414;
+            border: 1px solid #1f1f1f;
+            color: #E3E3E3;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+        .account-avatar {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #A78BFA, #F472B6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            color: #fff;
+            flex-shrink: 0;
+        }
+        .sb-divider {
+            height: 1px;
+            background: #1f1f1f;
+            margin: 12px 0;
+        }
+
+        /* Share modal / shared banner */
+        .share-url-box {
+            background: #141414;
+            border: 1px solid #262626;
+            border-radius: 10px;
+            padding: 12px 14px;
+            color: #E3E3E3;
+            font-family: monospace;
+            font-size: 13px;
+            word-break: break-all;
+            margin: 8px 0;
+        }
+        .shared-banner {
+            background: #141414;
+            border: 1px solid #262626;
+            border-radius: 12px;
+            padding: 12px 16px;
+            color: #aaa;
+            font-size: 13px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
     </style>
 """, unsafe_allow_html=True)
 
-# --- SPARKLE AVATAR (Meta AI-style gradient) ---
+# --- SPARKLE AVATAR ---
 SPARKLE_AVATAR = (
     "data:image/svg+xml;utf8,"
     "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
@@ -207,9 +225,6 @@ SPARKLE_AVATAR = (
     "</svg>"
 )
 
-# --- HEADER ---
-st.title("CraftGPT Agent")
-
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 
@@ -223,11 +238,11 @@ SUPABASE_URL   = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_DB_URL = st.secrets.get("SUPABASE_DB_URL") or os.getenv("SUPABASE_DB_URL")
 
-# --- WORKSPACE DIRECTORY ---
+# --- WORKSPACE ---
 WORKSPACE = "agent_workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
-# --- PERSISTENT CHECKPOINTER ---
+# --- CHECKPOINTER ---
 @st.cache_resource
 def get_checkpointer():
     try:
@@ -268,89 +283,70 @@ def check_pwd(password: str, hashed: str) -> bool:
     except Exception:
         return False
 
-# --- AUTH FUNCTIONS ---
-def sign_up(username: str, password: str, email: str = ""):
-    username = username.strip().lower()
-    email = email.strip().lower()
-    if not username or not password:
-        return False, "Fill in all fields."
-    if " " in username:
-        return False, "Username cannot contain spaces."
-    if len(username) < 3:
-        return False, "Username must be 3+ characters."
-    if len(password) < 6:
-        return False, "Password must be 6+ characters."
+# ============================================================
+# PUBLIC SHARE VIEW — checked BEFORE auth gate
+# ============================================================
+share_token = st.query_params.get("share")
+if share_token and supabase:
     try:
-        existing = supabase.table("profiles").select("id").eq("username", username).execute()
-        if existing.data:
-            return False, "Username already taken."
-        recovery = "-".join(pysecrets.token_hex(2).upper() for _ in range(3))
-        recovery_hash = bcrypt.hashpw(recovery.encode(), bcrypt.gensalt()).decode()
-        payload = {
-            "username": username,
-            "password_hash": hash_pwd(password),
-            "recovery_hash": recovery_hash,
-        }
-        if email:
-            payload["email"] = email
-        result = supabase.table("profiles").insert(payload).execute()
-        if result.data:
-            return True, recovery
-        return False, "Signup failed."
+        row = supabase.table("shared_chats").select("session_id, user_id") \
+            .eq("share_token", share_token).execute().data
+        if row:
+            sid = row[0]["session_id"]
+            msgs = supabase.table("chat_messages").select("role, content") \
+                .eq("session_id", sid).order("created_at").execute().data
+
+            st.markdown(
+                "<div class='shared-banner'>"
+                "<span>📎 This is a shared chat — read only</span>"
+                "<span>Powered by CraftGPT</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            st.title("CraftGPT Agent")
+
+            for m in msgs or []:
+                avatar = SPARKLE_AVATAR if m["role"] == "assistant" else "👤"
+                with st.chat_message(m["role"], avatar=avatar):
+                    st.write(m["content"])
+
+            st.markdown(
+                "<div style='text-align:center;color:#666;margin-top:40px;"
+                "font-size:13px;'>Shared with CraftGPT</div>",
+                unsafe_allow_html=True,
+            )
+            st.stop()
+        else:
+            st.warning("This shared chat link is invalid or has been deleted.")
+            st.stop()
     except Exception as e:
-        return False, f"Error: {e}"
+        st.error(f"Could not load shared chat: {e}")
+        st.stop()
 
-def log_in(username: str, password: str):
-    username = username.strip().lower()
-    try:
-        res = supabase.table("profiles").select("id, username, password_hash").eq("username", username).execute()
-        if not res.data:
-            return None
-        user = res.data[0]
-        if not user.get("password_hash"):
-            return None
-        if check_pwd(password, user["password_hash"]):
-            return {"id": user["id"], "username": user["username"]}
-        return None
-    except Exception:
-        return None
-
-def reset_password(username: str, recovery_code: str, new_password: str):
-    username = username.strip().lower()
-    if len(new_password) < 6:
-        return False, "Password must be 6+ characters."
-    try:
-        res = supabase.table("profiles").select("id, recovery_hash").eq("username", username).execute()
-        if not res.data:
-            return False, "Username not found."
-        user = res.data[0]
-        if not user.get("recovery_hash"):
-            return False, "No recovery code set for this account."
-        if not check_pwd(recovery_code.strip().upper(), user["recovery_hash"]):
-            return False, "Invalid recovery code."
-        supabase.table("profiles").update({
-            "password_hash": hash_pwd(new_password)
-        }).eq("id", user["id"]).execute()
-        return True, "Password updated!"
-    except Exception as e:
-        return False, f"Error: {e}"
-
-# --- AUTH GATE ---
+# ============================================================
+# AUTH GATE
+# ============================================================
 if "user" not in st.session_state:
     st.session_state.user = None
 if "is_guest" not in st.session_state:
     st.session_state.is_guest = False
 if "show_reset" not in st.session_state:
     st.session_state.show_reset = False
+if "show_search" not in st.session_state:
+    st.session_state.show_search = False
+if "show_media" not in st.session_state:
+    st.session_state.show_media = False
+if "show_share_modal" not in st.session_state:
+    st.session_state.show_share_modal = False
 
-# --- GUEST STATE ---
 if "guest_messages" not in st.session_state:
     st.session_state.guest_messages = []
 if "guest_thread_id" not in st.session_state:
     st.session_state.guest_thread_id = str(uuid.uuid4())
 
 if st.session_state.user is None and not st.session_state.is_guest:
-    st.markdown("### Welcome to CraftGPT")
+    st.title("CraftGPT Agent")
+    st.markdown("### Welcome")
 
     if not supabase:
         st.error("Supabase not configured. Check secrets.")
@@ -384,7 +380,6 @@ if st.session_state.user is None and not st.session_state.is_guest:
                 st.rerun()
         st.stop()
 
-    # --- LOGIN / SIGNUP ---
     tab_login, tab_signup = st.tabs(["Login", "Sign Up"])
 
     with tab_login:
@@ -418,8 +413,7 @@ if st.session_state.user is None and not st.session_state.is_guest:
                         st.warning(
                             f"### SAVE THIS RECOVERY CODE\n\n"
                             f"## `{result}`\n\n"
-                            "**Write it down right now.** You'll need it if you forget your password. "
-                            "It will **never** be shown again."
+                            "**Write it down right now.** You'll need it if you forget your password."
                         )
                         user = log_in(new_user, new_pwd)
                         if user:
@@ -469,6 +463,7 @@ def delete_session(sid):
     if is_guest or not user_id: return
     try:
         supabase.table("chat_messages").delete().eq("session_id", sid).eq("user_id", user_id).execute()
+        supabase.table("shared_chats").delete().eq("session_id", sid).eq("user_id", user_id).execute()
         supabase.table("chat_sessions").delete().eq("id", sid).eq("user_id", user_id).execute()
     except Exception:
         pass
@@ -490,8 +485,7 @@ def save_message(sid, role, content):
         pass
 
 def update_session_title(sid, new_title):
-    if is_guest or not user_id or not sid:
-        return
+    if is_guest or not user_id or not sid: return
     try:
         supabase.table("chat_sessions").update(
             {"session_name": new_title}
@@ -517,6 +511,44 @@ def generate_session_title(first_message: str) -> str:
     except Exception:
         return first_message.strip()[:30] or "New Chat"
 
+# --- SHARE HELPERS ---
+def generate_share_token():
+    return secrets.token_urlsafe(8)[:10]
+
+def get_share_link(sid):
+    """Return existing share token for a session, or None."""
+    if is_guest or not user_id or not sid: return None
+    try:
+        r = supabase.table("shared_chats").select("share_token") \
+            .eq("session_id", sid).eq("user_id", user_id).execute().data
+        return r[0]["share_token"] if r else None
+    except Exception:
+        return None
+
+def create_share_link(sid):
+    """Create a share token for a session. Returns token."""
+    if is_guest or not user_id or not sid: return None
+    existing = get_share_link(sid)
+    if existing:
+        return existing
+    try:
+        token = generate_share_token()
+        supabase.table("shared_chats").insert({
+            "session_id": sid, "user_id": user_id, "share_token": token
+        }).execute()
+        return token
+    except Exception:
+        return None
+
+def delete_share_link(sid):
+    if is_guest or not user_id or not sid: return
+    try:
+        supabase.table("shared_chats").delete() \
+            .eq("session_id", sid).eq("user_id", user_id).execute()
+    except Exception:
+        pass
+
+# --- SESSION BOOTSTRAP ---
 if "active_session_id" not in st.session_state:
     if is_guest:
         st.session_state.active_session_id = None
@@ -722,99 +754,230 @@ def build_agent(model_id, provider):
             continue
     raise RuntimeError(f"All models failed. Last error: {last_err}")
 
-# --- SIDEBAR ---
+# ============================================================
+# SIDEBAR
+# ============================================================
 with st.sidebar:
-    # User chip at top
-    if is_guest:
-        st.markdown(
-            f"<div style='padding:10px 12px;border-radius:10px;"
-            f"background:#141414;border:1px solid #1f1f1f;color:#aaa;"
-            f"font-size:13px;'>👤 Guest Mode</div>",
-            unsafe_allow_html=True,
-        )
-        if st.button("Log in / Sign up", use_container_width=True):
-            st.session_state.user = None
-            st.session_state.is_guest = False
-            st.session_state.active_session_id = None
-            st.rerun()
-    else:
-        st.markdown(
-            f"<div style='padding:10px 12px;border-radius:10px;"
-            f"background:#141414;border:1px solid #1f1f1f;color:#E3E3E3;"
-            f"font-size:13px;'>👤 {user_name}</div>",
-            unsafe_allow_html=True,
-        )
-        if st.button("Log out", use_container_width=True):
-            st.session_state.user = None
-            st.session_state.is_guest = False
-            st.session_state.active_session_id = None
-            st.rerun()
-
-    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-
-    # --- New Chat (Meta AI-style row) ---
     if not is_guest:
-        if st.button("✎  New chat", use_container_width=True):
+        if st.button("✎   New chat", use_container_width=True, key="sb_new_chat"):
             new = create_session("New Chat")
             if new: st.session_state.active_session_id = new["id"]
             st.rerun()
-
-        # --- History label ---
-        st.markdown("<div class='sidebar-label'>History</div>", unsafe_allow_html=True)
-
-        # --- Flat history list ---
-        sessions = load_sessions()
-        for s in sessions:
-            is_active = s["id"] == st.session_state.active_session_id
-            # Active gets a subtle highlight; inactive is plain
-            label = s["session_name"] if not is_active else f"● {s['session_name']}"
-            if st.button(label, key=f"sel_{s['id']}", use_container_width=True):
-                st.session_state.active_session_id = s["id"]
-                st.rerun()
-
-        # --- Delete for active session (moved to bottom, quieter) ---
-        if len(sessions) > 1:
-            with st.expander("Manage sessions"):
-                for s in sessions:
-                    cols = st.columns([4, 1])
-                    with cols[0]:
-                        st.caption(s["session_name"])
-                    with cols[1]:
-                        if st.button("🗑", key=f"del2_{s['id']}"):
-                            delete_session(s["id"])
-                            remaining = [x for x in load_sessions() if x["id"] != s["id"]]
-                            if remaining:
-                                st.session_state.active_session_id = remaining[0]["id"]
-                            st.rerun()
     else:
-        st.markdown("<div class='sidebar-label'>Guest Chat</div>", unsafe_allow_html=True)
-        if st.button("Clear chat", use_container_width=True):
+        if st.button("✎   New chat", use_container_width=True, key="sb_new_chat_guest"):
             st.session_state.guest_messages = []
             st.session_state.guest_thread_id = str(uuid.uuid4())
             st.rerun()
 
-    st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+    if st.button("🔍   Search chats", use_container_width=True, key="sb_search"):
+        st.session_state.show_search = not st.session_state.show_search
+        st.session_state.show_media = False
+        st.rerun()
 
-    # --- Model picker ---
-    st.markdown("<div class='sidebar-label'>Model</div>", unsafe_allow_html=True)
+    if st.button("🖼   Media", use_container_width=True, key="sb_media"):
+        st.session_state.show_media = not st.session_state.show_media
+        st.session_state.show_search = False
+        st.rerun()
+
+    if st.session_state.show_search and not is_guest:
+        search_query = st.text_input(
+            "Search", placeholder="Search chats & messages...",
+            label_visibility="collapsed", key="search_input",
+        )
+        if search_query:
+            matching_sids = set()
+            try:
+                msgs = supabase.table("chat_messages").select("session_id, content") \
+                    .eq("user_id", user_id).execute().data
+                for m in msgs:
+                    if search_query.lower() in (m.get("content") or "").lower():
+                        matching_sids.add(m["session_id"])
+            except Exception:
+                pass
+            all_sessions = load_sessions()
+            filtered = [
+                s for s in all_sessions
+                if search_query.lower() in s["session_name"].lower()
+                or s["id"] in matching_sids
+            ]
+            st.markdown(f"<div class='sb-label'>Results ({len(filtered)})</div>", unsafe_allow_html=True)
+            if filtered:
+                for s in filtered:
+                    if st.button(s["session_name"], key=f"srch_{s['id']}", use_container_width=True):
+                        st.session_state.active_session_id = s["id"]
+                        st.session_state.show_search = False
+                        st.rerun()
+            else:
+                st.caption("No matches.")
+        st.markdown("<div class='sb-divider'></div>", unsafe_allow_html=True)
+
+    if st.session_state.show_media:
+        st.markdown("<div class='sb-label'>Media</div>", unsafe_allow_html=True)
+        if is_guest:
+            st.caption("Guest uploads aren't saved.")
+        else:
+            st.caption("Uploaded images live inside each chat. Open a chat to view them.")
+        st.markdown("<div class='sb-divider'></div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='sb-label'>History</div>", unsafe_allow_html=True)
+
+    if is_guest:
+        st.caption("Guest chats are not saved")
+    else:
+        for s in load_sessions():
+            is_active = s["id"] == st.session_state.active_session_id
+            label = f"● {s['session_name']}" if is_active else s["session_name"]
+            if st.button(label, key=f"sel_{s['id']}", use_container_width=True):
+                st.session_state.active_session_id = s["id"]
+                st.session_state.show_search = False
+                st.session_state.show_media = False
+                st.rerun()
+
+    if not is_guest and len(load_sessions()) > 1:
+        with st.expander("Manage", expanded=False):
+            for s in load_sessions():
+                cols = st.columns([4, 1])
+                with cols[0]:
+                    st.caption(s["session_name"])
+                with cols[1]:
+                    if st.button("🗑", key=f"del2_{s['id']}"):
+                        delete_session(s["id"])
+                        remaining = [x for x in load_sessions() if x["id"] != s["id"]]
+                        if remaining:
+                            st.session_state.active_session_id = remaining[0]["id"]
+                        st.rerun()
+
+    st.markdown("<div class='sb-label'>Model</div>", unsafe_allow_html=True)
     model_mapping = {
         "GPT-OSS 120B (Fast, Free)":    {"id": "openai/gpt-oss-120b",              "provider": "groq"},
         "GPT-OSS 20B (Fastest, Free)":  {"id": "openai/gpt-oss-20b",                 "provider": "groq"},
         "Ling 3.0 Flash VL (Vision)":   {"id": "inclusionai/ling-3.0-flash-vl:free",   "provider": "openrouter"},
         "North Mini Code (Free)":       {"id": "cohere/north-mini-code:free",         "provider": "openrouter"},
     }
-    selected_model_name = st.selectbox("Choose Agent Brain:", options=list(model_mapping.keys()), index=0, label_visibility="collapsed")
+    selected_model_name = st.selectbox(
+        "Model", options=list(model_mapping.keys()),
+        index=0, label_visibility="collapsed",
+    )
     selected_model_id = model_mapping[selected_model_name]["id"]
 
-    st.markdown("<div class='sidebar-label'>Media</div>", unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("Snapshot your worksheet:", type=["jpg", "jpeg", "png"],
-        key=f"homework_file_{st.session_state.uploader_key}", label_visibility="collapsed")
+    st.markdown("<div class='sb-label'>Attach Image</div>", unsafe_allow_html=True)
+    uploaded_file = st.file_uploader(
+        "Upload", type=["jpg", "jpeg", "png"],
+        key=f"homework_file_{st.session_state.uploader_key}",
+        label_visibility="collapsed",
+    )
 
-# --- TOP-RIGHT MODEL BADGE (Meta AI vibe) ---
-st.markdown(
-    f"<div class='model-badge'>{selected_model_name.split(' (')[0]}</div>",
-    unsafe_allow_html=True,
-)
+    st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div class='sb-divider'></div>", unsafe_allow_html=True)
+
+    if is_guest:
+        st.markdown(
+            "<div class='account-chip'>"
+            "<div class='account-avatar'>G</div>"
+            "<div>Guest</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Log in / Sign up", use_container_width=True, key="sb_login"):
+            st.session_state.user = None
+            st.session_state.is_guest = False
+            st.session_state.active_session_id = None
+            st.rerun()
+    else:
+        initial = user_name[0].upper() if user_name else "?"
+        st.markdown(
+            f"<div class='account-chip'>"
+            f"<div class='account-avatar'>{initial}</div>"
+            f"<div>{user_name}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Log out", use_container_width=True, key="sb_logout"):
+            st.session_state.user = None
+            st.session_state.is_guest = False
+            st.session_state.active_session_id = None
+            st.rerun()
+
+# ============================================================
+# MAIN AREA
+# ============================================================
+st.title("CraftGPT Agent")
+
+# --- TOP-RIGHT HEADER ROW: Model badge + Share button ---
+hdr_left, hdr_mid, hdr_right = st.columns([6, 2, 1])
+
+with hdr_mid:
+    st.markdown(
+        f"<div style='text-align:right;padding-top:6px;'>"
+        f"<span class='model-badge'>{selected_model_name.split(' (')[0]}</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+with hdr_right:
+    if not is_guest and st.session_state.active_session_id:
+        existing_share = get_share_link(st.session_state.active_session_id)
+        with st.popover("🔗", use_container_width=False):
+            st.markdown("**Share chat**")
+            if st.button("🔗  Share chat", key="pop_share", use_container_width=True):
+                token = create_share_link(st.session_state.active_session_id)
+                if token:
+                    st.session_state.show_share_modal = True
+                    st.rerun()
+                else:
+                    st.error("Could not create share link.")
+            if existing_share:
+                if st.button("🚫  Delete link", key="pop_delete", use_container_width=True):
+                    delete_share_link(st.session_state.active_session_id)
+                    st.success("Share link deleted.")
+                    st.rerun()
+    else:
+        st.markdown(
+            "<div style='text-align:right;padding-top:6px;color:#444;'>"
+            "🔗</div>",
+            unsafe_allow_html=True,
+        )
+
+# --- SHARE MODAL ---
+@st.dialog("Share chat")
+def share_modal():
+    token = get_share_link(st.session_state.active_session_id)
+    if not token:
+        st.error("No share link found.")
+        return
+
+    share_url = f"{SHARE_BASE_URL}/?share={token}"
+
+    st.markdown("Copy this link and send it to anyone:")
+    st.markdown(f"<div class='share-url-box'>{share_url}</div>", unsafe_allow_html=True)
+
+    # Copy-to-clipboard via JS
+    st.components.v1.html(f"""
+        <button onclick="navigator.clipboard.writeText('{share_url}')"
+            style="background:#1f1f1f;color:#E3E3E3;border:1px solid #333;
+                   border-radius:8px;padding:8px 16px;cursor:pointer;
+                   font-size:13px;width:100%;">
+            📋  Copy link
+        </button>
+    """, height=50)
+
+    st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+
+    # WhatsApp button
+    wa_url = f"https://wa.me/?text={share_url}"
+    st.markdown(
+        f"<a href='{wa_url}' target='_blank' style='text-decoration:none;'>"
+        f"<div style='background:#1f1f1f;border:1px solid #333;"
+        f"border-radius:10px;padding:12px;text-align:center;"
+        f"color:#E3E3E3;font-size:14px;cursor:pointer;'>"
+        f"💬  Share on WhatsApp</div></a>",
+        unsafe_allow_html=True,
+    )
+
+# Trigger the modal
+if st.session_state.show_share_modal:
+    st.session_state.show_share_modal = False
+    share_modal()
 
 # --- RENDER CHAT HISTORY ---
 if is_guest:
