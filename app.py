@@ -526,19 +526,22 @@ def get_share_link(sid):
         return None
 
 def create_share_link(sid):
-    """Create a share token for a session. Returns token."""
-    if is_guest or not user_id or not sid: return None
+    """Create a share token for a session. Returns (token, error_msg)."""
+    if is_guest or not user_id or not sid:
+        return None, "Not logged in or no active session."
     existing = get_share_link(sid)
     if existing:
-        return existing
+        return existing, None
     try:
         token = generate_share_token()
-        supabase.table("shared_chats").insert({
+        resp = supabase.table("shared_chats").insert({
             "session_id": sid, "user_id": user_id, "share_token": token
         }).execute()
-        return token
-    except Exception:
-        return None
+        if not resp.data:
+            return None, "Insert returned no data."
+        return token, None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
 
 def delete_share_link(sid):
     if is_guest or not user_id or not sid: return
@@ -920,12 +923,12 @@ with hdr_right:
         with st.popover("🔗", use_container_width=False):
             st.markdown("**Share chat**")
             if st.button("🔗  Share chat", key="pop_share", use_container_width=True):
-                token = create_share_link(st.session_state.active_session_id)
+                token, err = create_share_link(st.session_state.active_session_id)
                 if token:
                     st.session_state.show_share_modal = True
                     st.rerun()
                 else:
-                    st.error("Could not create share link.")
+                    st.error(f"Could not create share link: {err}")
             if existing_share:
                 if st.button("🚫  Delete link", key="pop_delete", use_container_width=True):
                     delete_share_link(st.session_state.active_session_id)
