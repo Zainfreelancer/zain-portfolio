@@ -3,6 +3,7 @@ import io
 import base64
 import subprocess
 import sys
+import uuid
 from datetime import datetime
 
 import streamlit as st
@@ -162,6 +163,37 @@ if "is_guest" not in st.session_state:
 if "show_reset" not in st.session_state:
     st.session_state.show_reset = False
 
+# --- GUEST STATE (must be initialized before auth gate for migration) ---
+if "guest_messages" not in st.session_state:
+    st.session_state.guest_messages = []
+if "guest_thread_id" not in st.session_state:
+    st.session_state.guest_thread_id = str(uuid.uuid4())
+
+def migrate_guest_messages_to_user(new_user_dict):
+    """After login/signup, copy guest_messages into a fresh DB session."""
+    guest_msgs = st.session_state.get("guest_messages", [])
+    st.session_state.user = new_user_dict
+    st.session_state.is_guest = False
+    if guest_msgs:
+        global user_id  # we'll re-set from session_state below anyway
+        # Temporarily set user_id so create_session/save_message work
+        uid = new_user_dict["id"]
+        try:
+            r = supabase.table("chat_sessions").insert(
+                {"session_name": "Imported from Guest", "user_id": uid}
+            ).execute()
+            if r.data:
+                sid = r.data[0]["id"]
+                for m in guest_msgs:
+                    supabase.table("chat_messages").insert({
+                        "session_id": sid, "user_id": uid,
+                        "role": m["role"], "content": m["content"]
+                    }).execute()
+                st.session_state.active_session_id = sid
+        except Exception:
+            pass
+    st.session_state.guest_messages = []
+
 if st.session_state.user is None and not st.session_state.is_guest:
     st.markdown("### 🔐 Welcome to CraftGPT")
 
@@ -207,8 +239,7 @@ if st.session_state.user is None and not st.session_state.is_guest:
             if st.form_submit_button("Login", use_container_width=True):
                 user = log_in(login_user, login_pwd)
                 if user:
-                    st.session_state.user = user
-                    st.session_state.is_guest = False
+                    migrate_guest_messages_to_user(user)
                     st.rerun()
                 else:
                     st.error("❌ Invalid username or password.")
@@ -232,6 +263,11 @@ if st.session_state.user is None and not st.session_state.is_guest:
                             "**Write it down right now.** You'll need it if you forget your password. "
                             "It will **never** be shown again."
                         )
+                        # Auto-login the new user so guest messages carry over
+                        user = log_in(new_user, new_pwd)
+                        if user:
+                            migrate_guest_messages_to_user(user)
+                            st.rerun()
                     else:
                         st.error(f"❌ {result}")
 
@@ -501,7 +537,7 @@ def build_agent(model_id, provider):
 # --- SIDEBAR ---
 with st.sidebar:
     if is_guest:
-        st.info("👤 **Guest Mode** (chats won't be saved)")
+        st.info("👤 **Guest Mode** (chats kept this session only)")
         if st.button("🔐 Log in / Sign up", use_container_width=True):
             st.session_state.user = None
             st.session_state.is_guest = False
@@ -537,6 +573,14 @@ with st.sidebar:
                     if remaining: st.session_state.active_session_id = remaining[0]["id"]
                     st.rerun()
         st.divider()
+    else:
+        # Guest: show a "clear chat" button since they have no session list
+        st.header("💬 Guest Chat")
+        if st.button("🧹 Clear Chat", use_container_width=True):
+            st.session_state.guest_messages = []
+            st.session_state.guest_thread_id = str(uuid.uuid4())
+            st.rerun()
+        st.divider()
 
     st.header("⚙️ Configuration")
     model_mapping = {
@@ -552,7 +596,14 @@ with st.sidebar:
         key=f"homework_file_{st.session_state.uploader_key}")
 
 # --- RENDER CHAT HISTORY ---
-if not is_guest and st.session_state.active_session_id:
+if is_guest:
+    for i, msg in enumerate(st.session_state.guest_messages):
+        with st.chat_message(msg["role"], avatar=msg["role"]):
+            st.write(msg["content"])
+            if msg["role"] == "assistant":
+                st.download_button("📥 Download", data=msg["content"], file_name="solution.md",
+                    mime="text/markdown", key=f"dl_guest_{i}")
+elif st.session_state.active_session_id:
     for msg in load_messages(st.session_state.active_session_id):
         with st.chat_message(msg["role"], avatar=msg["role"]):
             st.write(msg["content"])
@@ -568,8 +619,12 @@ if uploaded_file:
 
 # --- AGENT CHAT ---
 if prompt := st.chat_input("Ask CraftGPT..."):
-    if not is_guest and st.session_state.active_session_id:
+    # Persist user message
+    if is_guest:
+        st.session_state.guest_messages.append({"role": "user", "content": prompt})
+    elif st.session_state.active_session_id:
         save_message(st.session_state.active_session_id, "user", prompt)
+
     with st.chat_message("user", avatar="user"):
         st.write(prompt)
     with st.chat_message("assistant", avatar="assistant"):
@@ -595,12 +650,23 @@ if prompt := st.chat_input("Ask CraftGPT..."):
                     ]}
                 else:
                     user_message = {"role": "user", "content": prompt}
-                thread_key = f"{user_id or 'guest'}-{st.session_state.active_session_id or 'guest'}"
+
+                # --- Thread isolation for guests ---
+                if is_guest:
+                    thread_key = f"guest-{st.session_state.guest_thread_id}"
+                else:
+                    thread_key = f"{user_id}-{st.session_state.active_session_id}"
+
                 response = handler.invoke(agent=agent, input={"messages": [user_message]},
                     config={"configurable": {"thread_id": thread_key}})
                 st.write(response)
-                if not is_guest and st.session_state.active_session_id:
+
+                # Persist assistant message
+                if is_guest:
+                    st.session_state.guest_messages.append({"role": "assistant", "content": response})
+                elif st.session_state.active_session_id:
                     save_message(st.session_state.active_session_id, "assistant", response)
+
                 if img_base64: st.session_state.uploader_key += 1
                 st.rerun()
             except Exception as exc:
