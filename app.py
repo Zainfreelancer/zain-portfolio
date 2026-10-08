@@ -994,7 +994,8 @@ with hdr_right:
         with st.popover("🔗", use_container_width=False):
             st.markdown("**Share chat**")
             if st.button("🔗  Share chat", key="pop_share", use_container_width=True):
-                token, err = create_share_link(st.session_state.active_session_id)gi
+                token, err = create_share_link(st.session_state.active_session_id)
+                
                 if token:
                     st.session_state.show_share_modal = True
                     st.rerun()
