@@ -283,6 +283,75 @@ def check_pwd(password: str, hashed: str) -> bool:
     except Exception:
         return False
 
+# --- AUTH FUNCTIONS ---
+def sign_up(username: str, password: str, email: str = ""):
+    username = username.strip().lower()
+    email = email.strip().lower()
+    if not username or not password:
+        return False, "Fill in all fields."
+    if " " in username:
+        return False, "Username cannot contain spaces."
+    if len(username) < 3:
+        return False, "Username must be 3+ characters."
+    if len(password) < 6:
+        return False, "Password must be 6+ characters."
+    try:
+        existing = supabase.table("profiles").select("id").eq("username", username).execute()
+        if existing.data:
+            return False, "Username already taken."
+        recovery = "-".join(pysecrets.token_hex(2).upper() for _ in range(3))
+        recovery_hash = bcrypt.hashpw(recovery.encode(), bcrypt.gensalt()).decode()
+        payload = {
+            "username": username,
+            "password_hash": hash_pwd(password),
+            "recovery_hash": recovery_hash,
+        }
+        if email:
+            payload["email"] = email
+        result = supabase.table("profiles").insert(payload).execute()
+        if result.data:
+            return True, recovery
+        return False, "Signup failed."
+    except Exception as e:
+        return False, f"Error: {e}"
+
+
+def log_in(username: str, password: str):
+    username = username.strip().lower()
+    try:
+        res = supabase.table("profiles").select("id, username, password_hash").eq("username", username).execute()
+        if not res.data:
+            return None
+        user = res.data[0]
+        if not user.get("password_hash"):
+            return None
+        if check_pwd(password, user["password_hash"]):
+            return {"id": user["id"], "username": user["username"]}
+        return None
+    except Exception:
+        return None
+
+
+def reset_password(username: str, recovery_code: str, new_password: str):
+    username = username.strip().lower()
+    if len(new_password) < 6:
+        return False, "Password must be 6+ characters."
+    try:
+        res = supabase.table("profiles").select("id, recovery_hash").eq("username", username).execute()
+        if not res.data:
+            return False, "Username not found."
+        user = res.data[0]
+        if not user.get("recovery_hash"):
+            return False, "No recovery code set for this account."
+        if not check_pwd(recovery_code.strip().upper(), user["recovery_hash"]):
+            return False, "Invalid recovery code."
+        supabase.table("profiles").update({
+            "password_hash": hash_pwd(new_password)
+        }).eq("id", user["id"]).execute()
+        return True, "Password updated!"
+    except Exception as e:
+        return False, f"Error: {e}"
+
 # ============================================================
 # PUBLIC SHARE VIEW — checked BEFORE auth gate
 # ============================================================
