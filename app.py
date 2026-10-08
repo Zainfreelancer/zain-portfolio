@@ -987,17 +987,20 @@ with hdr_mid:
     )
 
 with hdr_right:
+    st.caption(f"g={is_guest} sid={st.session_state.active_session_id}")
     if not is_guest and st.session_state.active_session_id:
         existing_share = get_share_link(st.session_state.active_session_id)
+        st.caption(f"share={existing_share}")
         with st.popover("🔗", use_container_width=False):
             st.markdown("**Share chat**")
             if st.button("🔗  Share chat", key="pop_share", use_container_width=True):
-                token, err = create_share_link(st.session_state.active_session_id)
+                token, err = create_share_link(st.session_state.active_session_id)gi
                 if token:
                     st.session_state.show_share_modal = True
                     st.rerun()
                 else:
                     st.error(f"Could not create share link: {err}")
+
             if existing_share:
                 if st.button("🚫  Delete link", key="pop_delete", use_container_width=True):
                     delete_share_link(st.session_state.active_session_id)
