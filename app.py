@@ -805,6 +805,13 @@ FALLBACK_CHAIN = [
     ("openrouter", "inclusionai/ling-3.0-flash-vl:free"),
 ]
 
+model_mapping = {
+    "GPT-OSS 120B (Fast, Free)":    {"id": "openai/gpt-oss-120b",              "provider": "groq"},
+    "GPT-OSS 20B (Fastest, Free)":  {"id": "openai/gpt-oss-20b",                 "provider": "groq"},
+    "Ling 3.0 Flash VL (Vision)":   {"id": "inclusionai/ling-3.0-flash-vl:free",   "provider": "openrouter"},
+    "North Mini Code (Free)":       {"id": "cohere/north-mini-code:free",         "provider": "openrouter"},
+}
+
 def _make_model(provider, model_id):
     if provider == "groq":
         if not GROQ_KEY:
