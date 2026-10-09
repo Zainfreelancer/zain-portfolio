@@ -621,11 +621,18 @@ def delete_share_link(sid):
         pass
 
 # --- SESSION BOOTSTRAP ---
-if "active_session_id" not in st.session_state:
-    if is_guest:
-        st.session_state.active_session_id = None
-    else:
-        sessions = load_sessions()
+# Ensure logged-in users always have a valid active session,
+# even if they just logged in or deleted their last session.
+if is_guest:
+    st.session_state.active_session_id = None
+else:
+    # Check if the current session_id is valid
+    current_sid = st.session_state.get("active_session_id")
+    sessions = load_sessions()
+    session_ids = [s["id"] for s in sessions]
+
+    if current_sid not in session_ids:
+        # Current session is None or stale — pick the newest, or create one
         if sessions:
             st.session_state.active_session_id = sessions[0]["id"]
         else:
@@ -679,8 +686,8 @@ def get_planet_riseset(planet_name):
         body = pmap[key]; now = datetime.utcnow()
         rise = SearchRiseSet(body, observer, Direction.Rise, now, 1); set_t = SearchRiseSet(body, observer, Direction.Set, now, 1)
         out = [f"**{planet_name.capitalize()} rise/set for Islamabad ({now.strftime('%Y-%m-%d')} UTC):**"]
-        if rise: out.append(f"• Rise: {rise.utc_strftime('%H:%M')} UTC")
-        if set_t: out.append(f"• Set: {set_t.utc_strftime('%H:%M')} UTC")
+        if rise: out.append(f"• Rise: {rise.strftime('%H:%M')} UTC")
+        if set_t: out.append(f"• Set: {set_t.strftime('%H:%M')} UTC")
         return "\n".join(out) if (rise or set_t) else f"No rise/set for {planet_name}."
     except Exception as e: return f"Planet failed: {e}"
 
@@ -987,10 +994,8 @@ with hdr_mid:
     )
 
 with hdr_right:
-    st.caption(f"g={is_guest} sid={st.session_state.active_session_id}")
     if not is_guest and st.session_state.active_session_id:
         existing_share = get_share_link(st.session_state.active_session_id)
-        st.caption(f"share={existing_share}")
         with st.popover("🔗", use_container_width=False):
             st.markdown("**Share chat**")
             if st.button("🔗  Share chat", key="pop_share", use_container_width=True):
