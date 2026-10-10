@@ -569,6 +569,7 @@ def generate_session_title(first_message: str) -> str:
             base_url="https://api.groq.com/openai/v1",
             api_key=GROQ_KEY,
             temperature=0.3,
+            max_tokens=20,   # ← cap at 20 tokens
         )
         resp = model.invoke(
             "Generate a concise 3-5 word title for this conversation. "
@@ -814,16 +815,34 @@ model_mapping = {
 
 def _make_model(provider, model_id):
     if provider == "groq":
-        if not GROQ_KEY:
-            raise RuntimeError("GROQ_API_KEY missing in secrets.")
-        return ChatOpenAI(model=model_id, base_url="https://api.groq.com/openai/v1",
-                          api_key=GROQ_KEY, temperature=0.1)
+        return ChatOpenAI(
+            model=model_id,
+            base_url="https://api.groq.com/openai/v1",
+            api_key=GROQ_KEY,
+            temperature=0.1,
+            max_tokens=800,   # ← HARD CAP on output length
+        )
     if provider == "openrouter":
-        if not OPENROUTER_KEY:
-            raise RuntimeError("OPENROUTER_API_KEY missing in secrets.")
-        return ChatOpenAI(model=model_id, base_url="https://openrouter.ai/api/v1",
-                          api_key=OPENROUTER_KEY, temperature=0.1)
-    raise RuntimeError(f"Unknown provider: {provider}")
+        return ChatOpenAI(
+            model=model_id,
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_KEY,
+            temperature=0.1,
+            max_tokens=800,   # ← same here
+        )
+    if provider == "openrouter":
+            raise RuntimeError(f"Unknown provider: {provider}")
+
+SYSTEM_PROMPT = (
+    "You are CraftGPT, a concise homework assistant. "
+    "Keep your answers SHORT and focused. "
+    "Aim for 100-200 words max unless the user asks for detail. "
+    "Use bullet points over paragraphs when possible. "
+    "Skip introductions, restatements, and conclusions. "
+    "Get straight to the answer. "
+    "Use tools only when necessary. "
+    "Never write essays."
+)
 
 def build_agent(model_id, provider):
     attempts = [(provider, model_id)] + [x for x in FALLBACK_CHAIN if x != (provider, model_id)]
@@ -831,7 +850,12 @@ def build_agent(model_id, provider):
     for prov, mid in attempts:
         try:
             model = _make_model(prov, mid)
-            agent = create_react_agent(model, agent_tools, checkpointer=checkpointer)
+            agent = create_react_agent(
+                model,
+                agent_tools,
+                checkpointer=checkpointer,
+                prompt=SYSTEM_PROMPT,
+            )
             if (prov, mid) != (provider, model_id):
                 st.info(f"Fallback in use: **{mid}** ({prov})")
             return agent
