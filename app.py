@@ -762,6 +762,19 @@ def generate_image(prompt: str) -> str:
     except Exception as e:
         return f"Image generation error: {e}"
 
+
+# --- LONG TEXT SAVER TOOL ---
+@tool
+def save_long_text(text: str, filename: str = "pasted_text.txt") -> str:
+    """Save a very long text to a file so it can be read in chunks."""
+    safe_path = os.path.join(WORKSPACE, os.path.basename(filename))
+    try:
+        with open(safe_path, 'w') as f:
+            f.write(text)
+        return f"Successfully saved {len(text)} characters to {filename}."
+    except Exception as e:
+        return f"Error saving text: {e}"
+
 # --- WRAP AS LANGCHAIN TOOLS ---
 @tool
 def internet_search(query: str) -> str:
@@ -808,7 +821,7 @@ def delegate_research(query: str) -> str:
 
 agent_tools = [internet_search, deep_scrape, astronomy_data, planet_riseset,
                run_python, read_file, write_file, edit_file, list_files, 
-               delegate_research, generate_image]
+               delegate_research, generate_image, save_long_text]
 
 # --- AGENT BUILDER ---
 FALLBACK_CHAIN = [
@@ -1065,14 +1078,26 @@ if show_suggestions:
     elif tab_selection == "Create images":
         c1, c2, c3 = st.columns(3)
         with c1:
-            if st.button("🐶 A cute puppy", use_container_width=True): _run_suggestion("Generate an image of a cute puppy")
-            if st.button("🌌 Cyberpunk city", use_container_width=True): _run_suggestion("Generate an image of a cyberpunk city at night")
+            if st.button("🐶 A cute puppy", use_container_width=True): 
+                st.session_state.direct_image_prompt = "A cute puppy"
+                st.rerun()
+            if st.button("🌌 Cyberpunk city", use_container_width=True): 
+                st.session_state.direct_image_prompt = "A cyberpunk city at night"
+                st.rerun()
         with c2:
-            if st.button("🐉 A friendly dragon", use_container_width=True): _run_suggestion("Generate an image of a friendly dragon")
-            if st.button("🚀 Space station", use_container_width=True): _run_suggestion("Generate an image of a futuristic space station")
+            if st.button("🐉 A friendly dragon", use_container_width=True): 
+                st.session_state.direct_image_prompt = "A friendly dragon"
+                st.rerun()
+            if st.button("🚀 Space station", use_container_width=True): 
+                st.session_state.direct_image_prompt = "A futuristic space station"
+                st.rerun()
         with c3:
-            if st.button("🎨 Abstract art", use_container_width=True): _run_suggestion("Generate an abstract art piece with vibrant colors")
-            if st.button("🏔️ Mountain landscape", use_container_width=True): _run_suggestion("Generate a realistic mountain landscape at sunset")
+            if st.button("🎨 Abstract art", use_container_width=True): 
+                st.session_state.direct_image_prompt = "Abstract art with vibrant colors"
+                st.rerun()
+            if st.button("🏔️ Mountain landscape", use_container_width=True): 
+                st.session_state.direct_image_prompt = "A realistic mountain landscape at sunset"
+                st.rerun()
 
 # --- TOP-RIGHT HEADER ROW: Model badge + Share button ---
 hdr_left, hdr_mid, hdr_right = st.columns([6, 2, 1])
@@ -1173,9 +1198,42 @@ img_base64 = None
 if uploaded_file:
     image = Image.open(uploaded_file); st.image(image, use_container_width=True)
     buf = io.BytesIO(); image.save(buf, format="JPEG"); img_base64 = base64.b64encode(buf.getvalue()).decode()
+# --- DIRECT IMAGE GENERATION (BYPASSES AGENT) ---
+if "direct_image_prompt" in st.session_state:
+    img_prompt = st.session_state.direct_image_prompt
+    del st.session_state.direct_image_prompt
+    
+    with st.chat_message("user", avatar="👤"):
+        st.write(f"Draw: {img_prompt}")
+        
+    with st.chat_message("assistant", avatar=SPARKLE_AVATAR):
+        with st.spinner("Generating image... (takes 3-5 seconds)"):
+            # Call the tool function directly
+            img_markdown = generate_image.invoke(img_prompt)
+            st.markdown(img_markdown, unsafe_allow_html=True)
+            
+    if not is_guest and st.session_state.active_session_id:
+        save_message(st.session_state.active_session_id, "assistant", f"[Generated Image: {img_prompt}]")
+
+
 
 # --- AGENT CHAT ---
 input_text = st.chat_input("Ask CraftGPT...")
+
+# Intercept long pastes (e.g., if it's over 3000 characters)
+if input_text and len(input_text) > 3000:
+    # 1. Save the massive text to a file
+    saved_msg = save_long_text.invoke({"text": input_text})
+    
+    # 2. Change the prompt to tell the AI to read the file
+    input_text = (
+        f"I have pasted a very long text. I saved it to `pasted_text.txt`. "
+        f"Please use the `read_file` tool to read `pasted_text.txt` and answer my question. "
+        f"Here is my question/context: {input_text[:500]}..." 
+    )
+    st.toast("📄 Long text detected! Saved to workspace to prevent crashing.")
+
+# Suggested prompt logic
 if "suggested_prompt" in st.session_state:
     input_text = st.session_state.suggested_prompt
     del st.session_state.suggested_prompt
