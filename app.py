@@ -224,6 +224,7 @@ GROQ_KEY       = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
 TAVILY_KEY     = st.secrets.get("TAVILY_API_KEY") or os.getenv("TAVILY_API_KEY")
 FIRECRAWL_KEY  = st.secrets.get("FIRECRAWL_API_KEY") or os.getenv("FIRECRAWL_API_KEY")
 IPGEO_KEY      = st.secrets.get("IPGEOLOCATION_API_KEY") or os.getenv("IPGEOLOCATION_API_KEY")
+HUGGINGFACE_KEY = st.secrets.get("HUGGINGFACE_API_KEY") or os.getenv("HUGGINGFACE_API_KEY")
 SUPABASE_URL   = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_DB_URL = st.secrets.get("SUPABASE_DB_URL") or os.getenv("SUPABASE_DB_URL")
@@ -740,6 +741,27 @@ def list_files() -> str:
         return "\n".join(files) if files else "Workspace is empty."
     except Exception as e: return f"Error listing files: {e}"
 
+# --- IMAGE GENERATION TOOL ---
+@tool
+def generate_image(prompt: str) -> str:
+    """Generate an image based on a text prompt using Hugging Face."""
+    if not HUGGINGFACE_KEY:
+        return "Image generation unavailable. (Missing HUGGINGFACE_API_KEY)."
+    
+    API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
+    headers = {"Authorization": f"Bearer {HUGGINGFACE_KEY}"}
+    
+    try:
+        response = requests.post(API_URL, headers=headers, json={"inputs": prompt}, timeout=30)
+        
+        if response.status_code == 200:
+            img_b64 = base64.b64encode(response.content).decode()
+            return f"![Generated Image](data:image/png;base64,{img_b64})"
+        else:
+            return f"Image generation failed. API returned: {response.text}"
+    except Exception as e:
+        return f"Image generation error: {e}"
+
 # --- WRAP AS LANGCHAIN TOOLS ---
 @tool
 def internet_search(query: str) -> str:
@@ -785,7 +807,8 @@ def delegate_research(query: str) -> str:
     except Exception as e: return f"Research delegation failed: {e}"
 
 agent_tools = [internet_search, deep_scrape, astronomy_data, planet_riseset,
-               run_python, read_file, write_file, edit_file, list_files, delegate_research]
+               run_python, read_file, write_file, edit_file, list_files, 
+               delegate_research, generate_image]
 
 # --- AGENT BUILDER ---
 FALLBACK_CHAIN = [
@@ -992,6 +1015,7 @@ else:
 if show_suggestions:
     st.markdown("<br>", unsafe_allow_html=True)
     
+    # 1. The Top Tabs
     tab_selection = st.radio(
         "Mode:", 
         ["✨ Try CraftGPT", "Ask anything", "Take action", "Create images"],
@@ -1001,6 +1025,7 @@ if show_suggestions:
     
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # 2. The Dynamic Grid
     if tab_selection == "✨ Try CraftGPT":
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -1038,7 +1063,16 @@ if show_suggestions:
             if st.button("🔋 Compare clean energy types", use_container_width=True): _run_suggestion("Compare clean energy types")
 
     elif tab_selection == "Create images":
-        st.info("🚧 Image generation is coming in the next update! (We need to add the Hugging Face API).")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("🐶 A cute puppy", use_container_width=True): _run_suggestion("Generate an image of a cute puppy")
+            if st.button("🌌 Cyberpunk city", use_container_width=True): _run_suggestion("Generate an image of a cyberpunk city at night")
+        with c2:
+            if st.button("🐉 A friendly dragon", use_container_width=True): _run_suggestion("Generate an image of a friendly dragon")
+            if st.button("🚀 Space station", use_container_width=True): _run_suggestion("Generate an image of a futuristic space station")
+        with c3:
+            if st.button("🎨 Abstract art", use_container_width=True): _run_suggestion("Generate an abstract art piece with vibrant colors")
+            if st.button("🏔️ Mountain landscape", use_container_width=True): _run_suggestion("Generate a realistic mountain landscape at sunset")
 
 # --- TOP-RIGHT HEADER ROW: Model badge + Share button ---
 hdr_left, hdr_mid, hdr_right = st.columns([6, 2, 1])
