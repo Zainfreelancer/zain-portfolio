@@ -54,11 +54,13 @@ st.markdown("""
         /* --- SLEEK SIDEBAR FIX --- */
         section[data-testid="stSidebar"] .stButton > button {
             font-size: 13px !important;
-            padding: 4px 12px !important;
-            color: #888 !important;
+            padding: 4px 10px !important;
+            color: #aaa !important;
             font-weight: 400 !important;
             height: auto !important;
+            min-height: 30px !important;
             border: none !important;
+            margin-bottom: -5px !important;
         }
         section[data-testid="stSidebar"] .stButton > button:hover {
             color: #fff !important;
@@ -557,7 +559,7 @@ def generate_session_title(first_message: str) -> str:
             base_url="https://api.groq.com/openai/v1",
             api_key=GROQ_KEY,
             temperature=0.3,
-            max_tokens=20,   # ← cap at 20 tokens
+            max_tokens=20,
         )
         resp = model.invoke(
             "Generate a concise 3-5 word title for this conversation. "
@@ -574,7 +576,6 @@ def generate_share_token():
     return secrets.token_urlsafe(8)[:10]
 
 def get_share_link(sid):
-    """Return existing share token for a session, or None."""
     if is_guest or not user_id or not sid: return None
     try:
         r = supabase.table("shared_chats").select("share_token") \
@@ -584,7 +585,6 @@ def get_share_link(sid):
         return None
 
 def create_share_link(sid):
-    """Create a share token for a session. Returns (token, error_msg)."""
     if is_guest or not user_id or not sid:
         return None, "Not logged in or no active session."
     existing = get_share_link(sid)
@@ -614,18 +614,14 @@ def _run_suggestion(text):
     st.rerun()
 
 # --- SESSION BOOTSTRAP ---
-# Ensure logged-in users always have a valid active session,
-# even if they just logged in or deleted their last session.
 if is_guest:
     st.session_state.active_session_id = None
 else:
-    # Check if the current session_id is valid
     current_sid = st.session_state.get("active_session_id")
     sessions = load_sessions()
     session_ids = [s["id"] for s in sessions]
 
     if current_sid not in session_ids:
-        # Current session is None or stale — pick the newest, or create one
         if sessions:
             st.session_state.active_session_id = sessions[0]["id"]
         else:
@@ -798,7 +794,6 @@ FALLBACK_CHAIN = [
     ("openrouter", "inclusionai/ling-3.0-flash-vl:free"),
 ]
 
-# The better model names
 model_mapping = {
     "⚡ Instant & Smart (Groq)":    {"id": "openai/gpt-oss-120b",              "provider": "groq"},
     "💨 Fastest Replies (Groq)":    {"id": "openai/gpt-oss-20b",                 "provider": "groq"},
@@ -935,19 +930,7 @@ with st.sidebar:
                 st.session_state.show_media = False
                 st.rerun()
 
-    if not is_guest and len(load_sessions()) > 1:
-        with st.expander("Manage", expanded=False):
-            for s in load_sessions():
-                cols = st.columns([4, 1])
-                with cols[0]:
-                    st.caption(s["session_name"])
-                with cols[1]:
-                    if st.button("🗑", key=f"del2_{s['id']}"):
-                        delete_session(s["id"])
-                        remaining = [x for x in load_sessions() if x["id"] != s["id"]]
-                        if remaining:
-                            st.session_state.active_session_id = remaining[0]["id"]
-                        st.rerun()
+    # Removed the "Manage" expander to keep the sidebar clean.
 
     st.markdown("<div class='sb-label'>Model</div>", unsafe_allow_html=True)
     selected_model_name = st.selectbox(
@@ -1009,7 +992,6 @@ else:
 if show_suggestions:
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # 1. The Top Tabs
     tab_selection = st.radio(
         "Mode:", 
         ["✨ Try CraftGPT", "Ask anything", "Take action", "Create images"],
@@ -1019,7 +1001,6 @@ if show_suggestions:
     
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. The Dynamic Grid
     if tab_selection == "✨ Try CraftGPT":
         c1, c2, c3 = st.columns(3)
         with c1:
