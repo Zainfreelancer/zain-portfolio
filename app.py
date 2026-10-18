@@ -51,28 +51,17 @@ st.markdown("""
         }
         section[data-testid="stSidebar"] * { color: #E3E3E3 !important; }
 
-        .stButton > button {
-            background-color: transparent !important;
-            color: #E3E3E3 !important;
-            border: 1px solid transparent !important;
-            border-radius: 10px !important;
-            text-align: left !important;
-            transition: background-color 0.15s ease, border-color 0.15s ease;
-            padding: 8px 12px !important;
-        }
-        .stButton > button:hover {
-            background-color: #1a1a1a !important;
-            border-color: #2a2a2a !important;
-        }
-        .stButton > button:focus {
-            box-shadow: none !important;
-            border-color: #2a2a2a !important;
-        }
+        /* --- SLEEK SIDEBAR FIX --- */
         section[data-testid="stSidebar"] .stButton > button {
-            background-color: transparent !important;
-            border: 1px solid transparent !important;
+            font-size: 13px !important;
+            padding: 4px 12px !important;
+            color: #888 !important;
+            font-weight: 400 !important;
+            height: auto !important;
+            border: none !important;
         }
         section[data-testid="stSidebar"] .stButton > button:hover {
+            color: #fff !important;
             background-color: #1a1a1a !important;
         }
 
@@ -183,7 +172,6 @@ st.markdown("""
             margin: 12px 0;
         }
 
-        /* Share modal / shared banner */
         .share-url-box {
             background: #141414;
             border: 1px solid #262626;
@@ -621,6 +609,10 @@ def delete_share_link(sid):
     except Exception:
         pass
 
+def _run_suggestion(text):
+    st.session_state.suggested_prompt = text
+    st.rerun()
+
 # --- SESSION BOOTSTRAP ---
 # Ensure logged-in users always have a valid active session,
 # even if they just logged in or deleted their last session.
@@ -806,11 +798,12 @@ FALLBACK_CHAIN = [
     ("openrouter", "inclusionai/ling-3.0-flash-vl:free"),
 ]
 
+# The better model names
 model_mapping = {
-    "GPT-OSS 120B (Fast, Free)":    {"id": "openai/gpt-oss-120b",              "provider": "groq"},
-    "GPT-OSS 20B (Fastest, Free)":  {"id": "openai/gpt-oss-20b",                 "provider": "groq"},
-    "Ling 3.0 Flash VL (Vision)":   {"id": "inclusionai/ling-3.0-flash-vl:free",   "provider": "openrouter"},
-    "North Mini Code (Free)":       {"id": "cohere/north-mini-code:free",         "provider": "openrouter"},
+    "⚡ Instant & Smart (Groq)":    {"id": "openai/gpt-oss-120b",              "provider": "groq"},
+    "💨 Fastest Replies (Groq)":    {"id": "openai/gpt-oss-20b",                 "provider": "groq"},
+    "🖼️ Vision & Analysis (Ling)":  {"id": "inclusionai/ling-3.0-flash-vl:free",   "provider": "openrouter"},
+    "💻 Best for Coding (North)":   {"id": "cohere/north-mini-code:free",         "provider": "openrouter"},
 }
 
 def _make_model(provider, model_id):
@@ -820,7 +813,7 @@ def _make_model(provider, model_id):
             base_url="https://api.groq.com/openai/v1",
             api_key=GROQ_KEY,
             temperature=0.1,
-            max_tokens=800,   # ← HARD CAP on output length
+            max_tokens=800,
         )
     if provider == "openrouter":
         return ChatOpenAI(
@@ -828,10 +821,9 @@ def _make_model(provider, model_id):
             base_url="https://openrouter.ai/api/v1",
             api_key=OPENROUTER_KEY,
             temperature=0.1,
-            max_tokens=800,   # ← same here
+            max_tokens=800,
         )
-    if provider == "openrouter":
-            raise RuntimeError(f"Unknown provider: {provider}")
+    raise RuntimeError(f"Unknown provider: {provider}")
 
 SYSTEM_PROMPT = (
     "You are CraftGPT, a concise homework assistant. "
@@ -958,12 +950,6 @@ with st.sidebar:
                         st.rerun()
 
     st.markdown("<div class='sb-label'>Model</div>", unsafe_allow_html=True)
-    model_mapping = {
-        "GPT-OSS 120B (Fast, Free)":    {"id": "openai/gpt-oss-120b",              "provider": "groq"},
-        "GPT-OSS 20B (Fastest, Free)":  {"id": "openai/gpt-oss-20b",                 "provider": "groq"},
-        "Ling 3.0 Flash VL (Vision)":   {"id": "inclusionai/ling-3.0-flash-vl:free",   "provider": "openrouter"},
-        "North Mini Code (Free)":       {"id": "cohere/north-mini-code:free",         "provider": "openrouter"},
-    }
     selected_model_name = st.selectbox(
         "Model", options=list(model_mapping.keys()),
         index=0, label_visibility="collapsed",
@@ -1012,6 +998,66 @@ with st.sidebar:
 # MAIN AREA
 # ============================================================
 st.title("CraftGPT Agent")
+
+# --- META AI STYLE INTERACTIVE START SCREEN ---
+show_suggestions = False
+if is_guest:
+    show_suggestions = len(st.session_state.guest_messages) == 0
+else:
+    show_suggestions = len(load_messages(st.session_state.active_session_id)) == 0
+
+if show_suggestions:
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # 1. The Top Tabs
+    tab_selection = st.radio(
+        "Mode:", 
+        ["✨ Try CraftGPT", "Ask anything", "Take action", "Create images"],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 2. The Dynamic Grid
+    if tab_selection == "✨ Try CraftGPT":
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("🔭 Debunk a popular myth", use_container_width=True): _run_suggestion("Debunk a popular myth")
+            if st.button("📖 Explain Gen Z slang", use_container_width=True): _run_suggestion("Explain Gen Z slang")
+        with c2:
+            if st.button("🏋️ Create a 20 min workout", use_container_width=True): _run_suggestion("Create a 20 min daily workout")
+            if st.button("🥗 Make a trending recipe", use_container_width=True): _run_suggestion("Make a trending seasonal recipe")
+        with c3:
+            if st.button("🧠 Turn notes into a study guide", use_container_width=True): _run_suggestion("Turn notes into a study guide")
+            if st.button("💡 Find a fun weekend project", use_container_width=True): _run_suggestion("Find a fun weekend project")
+
+    elif tab_selection == "Ask anything":
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("🍳 Find easy 20 minute dinners", use_container_width=True): _run_suggestion("Find easy 20 minute dinners")
+            if st.button("🗣️ Strengthen my debate skills", use_container_width=True): _run_suggestion("Strengthen my debate skills")
+        with c2:
+            if st.button("📖 Explain Gen Z slang", use_container_width=True): _run_suggestion("Explain Gen Z slang")
+            if st.button("🤖 Explain how AI chatbots work", use_container_width=True): _run_suggestion("Explain how AI chatbots work")
+        with c3:
+            if st.button("👕 Discover 2026 fashion trends", use_container_width=True): _run_suggestion("Discover 2026 fashion trends")
+            if st.button("💡 Find a fun weekend project", use_container_width=True): _run_suggestion("Find a fun weekend project")
+
+    elif tab_selection == "Take action":
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("🏋️ Create a 20 min workout", use_container_width=True): _run_suggestion("Create a 20 min daily workout")
+            if st.button("🔭 Explain sci-fi cars", use_container_width=True): _run_suggestion("Explain sci-fi cars with real physics")
+        with c2:
+            if st.button("💳 Audit my paid subscriptions", use_container_width=True): _run_suggestion("Audit my paid subscriptions")
+            if st.button("🌌 Explain mythical creature biology", use_container_width=True): _run_suggestion("Explain mythical creature biology")
+        with c3:
+            if st.button("📝 Turn notes into a study guide", use_container_width=True): _run_suggestion("Turn notes into a study guide")
+            if st.button("🔋 Compare clean energy types", use_container_width=True): _run_suggestion("Compare clean energy types")
+
+    elif tab_selection == "Create images":
+        st.info("🚧 Image generation is coming in the next update! (We need to add the Hugging Face API).")
 
 # --- TOP-RIGHT HEADER ROW: Model badge + Share button ---
 hdr_left, hdr_mid, hdr_right = st.columns([6, 2, 1])
@@ -1063,7 +1109,6 @@ def share_modal():
     st.markdown("Copy this link and send it to anyone:")
     st.markdown(f"<div class='share-url-box'>{share_url}</div>", unsafe_allow_html=True)
 
-    # Copy-to-clipboard via JS
     st.components.v1.html(f"""
         <button onclick="navigator.clipboard.writeText('{share_url}')"
             style="background:#1f1f1f;color:#E3E3E3;border:1px solid #333;
@@ -1075,7 +1120,6 @@ def share_modal():
 
     st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
 
-    # WhatsApp button
     wa_url = f"https://wa.me/?text={share_url}"
     st.markdown(
         f"<a href='{wa_url}' target='_blank' style='text-decoration:none;'>"
@@ -1116,7 +1160,13 @@ if uploaded_file:
     buf = io.BytesIO(); image.save(buf, format="JPEG"); img_base64 = base64.b64encode(buf.getvalue()).decode()
 
 # --- AGENT CHAT ---
-if prompt := st.chat_input("Ask CraftGPT..."):
+input_text = st.chat_input("Ask CraftGPT...")
+if "suggested_prompt" in st.session_state:
+    input_text = st.session_state.suggested_prompt
+    del st.session_state.suggested_prompt
+
+if input_text:
+    prompt = input_text
     if is_guest:
         st.session_state.guest_messages.append({"role": "user", "content": prompt})
     elif st.session_state.active_session_id:
