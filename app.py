@@ -748,7 +748,7 @@ def generate_image(prompt: str) -> str:
     if not HUGGINGFACE_KEY:
         return "Image generation unavailable. (Missing HUGGINGFACE_API_KEY)."
     
-    "API_URL" = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
+    "API_URL" == "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
     headers = {"Authorization": f"Bearer {HUGGINGFACE_KEY}"}
     
     try:
