@@ -24,7 +24,7 @@ from youngjin_langchain_tools import StreamlitLanggraphHandler
 st.set_page_config(page_title="CraftGPT Agent", page_icon="logo.svg", layout="centered")
 
 # --- SHARE CONFIG ---
-SHARE_BASE_URL = "https://zain-portfolio-n2syscmtkva6nf83ayk48j.streamlit.app"
+SHARE_BASE_URL = "https://craftgpt-agent.streamlit.app"
 
 # --- META AI-INSPIRED GLOBAL CSS ---
 st.markdown("""
