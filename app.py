@@ -747,8 +747,8 @@ def generate_image(prompt: str) -> str:
     """Generate an image based on a text prompt using Hugging Face."""
     if not HUGGINGFACE_KEY:
         return "Image generation unavailable. (Missing HUGGINGFACE_API_KEY)."
-    
-    "API_URL" == "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
+     
+    API_URL = "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0"
     headers = {"Authorization": f"Bearer {HUGGINGFACE_KEY}"}
     
     try:
@@ -888,9 +888,10 @@ def build_agent(model_id, provider):
     raise RuntimeError(f"All models failed. Last error: {last_err}")
 
 # ============================================================
-# SIDEBAR
+# SIDEBAR (DEEPSEEK STYLE WITH SEARCH & MEDIA)
 # ============================================================
 with st.sidebar:
+    # 1. NEW CHAT BUTTON
     if not is_guest:
         if st.button("✎   New chat", use_container_width=True, key="sb_new_chat"):
             new = create_session("New Chat")
@@ -902,19 +903,23 @@ with st.sidebar:
             st.session_state.guest_thread_id = str(uuid.uuid4())
             st.rerun()
 
-    if st.button("🔍   Search chats", use_container_width=True, key="sb_search"):
-        st.session_state.show_search = not st.session_state.show_search
-        st.session_state.show_media = False
-        st.rerun()
+    # 2. SEARCH & MEDIA BUTTONS (Compact Row)
+    col_search, col_media = st.columns(2)
+    with col_search:
+        if st.button("🔍 Search", use_container_width=True, key="sb_search"):
+            st.session_state.show_search = not st.session_state.show_search
+            st.session_state.show_media = False
+            st.rerun()
+    with col_media:
+        if st.button("🖼 Media", use_container_width=True, key="sb_media"):
+            st.session_state.show_media = not st.session_state.show_media
+            st.session_state.show_search = False
+            st.rerun()
 
-    if st.button("🖼   Media", use_container_width=True, key="sb_media"):
-        st.session_state.show_media = not st.session_state.show_media
-        st.session_state.show_search = False
-        st.rerun()
-
+    # --- SEARCH PANEL ---
     if st.session_state.show_search and not is_guest:
         search_query = st.text_input(
-            "Search", placeholder="Search chats & messages...",
+            "Search", placeholder="Search chats...",
             label_visibility="collapsed", key="search_input",
         )
         if search_query:
@@ -944,30 +949,16 @@ with st.sidebar:
                 st.caption("No matches.")
         st.markdown("<div class='sb-divider'></div>", unsafe_allow_html=True)
 
+    # --- MEDIA PANEL ---
     if st.session_state.show_media:
         st.markdown("<div class='sb-label'>Media</div>", unsafe_allow_html=True)
         if is_guest:
             st.caption("Guest uploads aren't saved.")
         else:
-            st.caption("Uploaded images live inside each chat. Open a chat to view them.")
+            st.caption("Uploaded images live inside each chat.")
         st.markdown("<div class='sb-divider'></div>", unsafe_allow_html=True)
 
-    st.markdown("<div class='sb-label'>History</div>", unsafe_allow_html=True)
-
-    if is_guest:
-        st.caption("Guest chats are not saved")
-    else:
-        for s in load_sessions():
-            is_active = s["id"] == st.session_state.active_session_id
-            label = f"● {s['session_name']}" if is_active else s["session_name"]
-            if st.button(label, key=f"sel_{s['id']}", use_container_width=True):
-                st.session_state.active_session_id = s["id"]
-                st.session_state.show_search = False
-                st.session_state.show_media = False
-                st.rerun()
-
-    # Removed the "Manage" expander to keep the sidebar clean.
-
+    # 3. MODEL & UPLOAD
     st.markdown("<div class='sb-label'>Model</div>", unsafe_allow_html=True)
     selected_model_name = st.selectbox(
         "Model", options=list(model_mapping.keys()),
@@ -981,10 +972,27 @@ with st.sidebar:
         key=f"homework_file_{st.session_state.uploader_key}",
         label_visibility="collapsed",
     )
-
-    st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+    
     st.markdown("<div class='sb-divider'></div>", unsafe_allow_html=True)
 
+    # 4. SCROLLABLE HISTORY
+    st.markdown("<div class='sb-label'>History</div>", unsafe_allow_html=True)
+    with st.container(height=350, border=False): # Reduced to 350 to fit the extra buttons
+        if is_guest:
+            st.caption("Guest chats are not saved")
+        else:
+            for s in load_sessions():
+                is_active = s["id"] == st.session_state.active_session_id
+                label = f"● {s['session_name']}" if is_active else s["session_name"]
+                if st.button(label, key=f"sel_{s['id']}", use_container_width=True):
+                    st.session_state.active_session_id = s["id"]
+                    st.session_state.show_search = False
+                    st.session_state.show_media = False
+                    st.rerun()
+
+    st.markdown("<div class='sb-divider'></div>", unsafe_allow_html=True)
+
+    # 5. PINNED ACCOUNT (At the absolute bottom)
     if is_guest:
         st.markdown(
             "<div class='account-chip'>"
@@ -1012,6 +1020,8 @@ with st.sidebar:
             st.session_state.is_guest = False
             st.session_state.active_session_id = None
             st.rerun()
+
+ 
 
 # ============================================================
 # MAIN AREA
@@ -1208,8 +1218,8 @@ if "direct_image_prompt" in st.session_state:
         
     with st.chat_message("assistant", avatar=SPARKLE_AVATAR):
         with st.spinner("Generating image... (takes 3-5 seconds)"):
-            # Call the tool function directly
-            img_markdown = generate_image.invoke(img_prompt)
+            # Call the tool function directly with a dictionary
+            img_markdown = generate_image.invoke({"prompt": img_prompt}) 
             st.markdown(img_markdown, unsafe_allow_html=True)
             
     if not is_guest and st.session_state.active_session_id:
