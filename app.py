@@ -750,7 +750,7 @@ def generate_image(prompt: str) -> str:
     import urllib.parse
     
     encoded_prompt = urllib.parse.quote(prompt)
-    image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1024&height=1024&nologo=true"
+    image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux-realism&width=1024&height=1024&nologo=true"
     
     try:
         # Verify the URL is reachable (optional, but helps catch errors)
