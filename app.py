@@ -353,7 +353,7 @@ if share_token and supabase:
             .eq("share_token", share_token).execute().data
         if row:
             sid = row[0]["session_id"]
-            msgs = supabase.table("chat_messages").select("role, content") \
+            msgs = supabase.table("chat_messages").select("role, content, image_base64") \
                 .eq("session_id", sid).order("created_at").execute().data
 
             st.markdown(
@@ -368,6 +368,8 @@ if share_token and supabase:
             for m in msgs or []:
                 avatar = SPARKLE_AVATAR if m["role"] == "assistant" else "👤"
                 with st.chat_message(m["role"], avatar=avatar):
+                    if m.get("image_base64"):
+                        st.markdown(f'<img src="data:image/jpeg;base64,{m["image_base64"]}" style="max-width: 300px; border-radius: 10px; margin-bottom: 10px;">', unsafe_allow_html=True)
                     st.write(m["content"])
 
             st.markdown(
@@ -535,12 +537,16 @@ def load_messages(sid):
     except Exception:
         return []
 
-def save_message(sid, role, content):
+def save_message(sid, role, content, image_base64=None):
     if is_guest or not user_id or not sid: return
     try:
-        supabase.table("chat_messages").insert({
+        payload = {
             "session_id": sid, "user_id": user_id, "role": role, "content": content
-        }).execute()
+        }
+        if image_base64:
+            payload["image_base64"] = image_base64
+            
+        supabase.table("chat_messages").insert(payload).execute()
     except Exception:
         pass
 
@@ -865,7 +871,8 @@ SYSTEM_PROMPT = (
     "Use bullet points over paragraphs when possible. "
     "Skip introductions, restatements, and conclusions. "
     "Get straight to the answer. "
-    "Use tools only when necessary. "
+    "IMPORTANT: If the user asks you to draw, generate, or create an image/picture, "
+    "you MUST use the generate_image tool. Do NOT use internet_search for images. "
     "Never write essays."
 )
 
@@ -1192,6 +1199,8 @@ if is_guest:
     for i, msg in enumerate(st.session_state.guest_messages):
         avatar = SPARKLE_AVATAR if msg["role"] == "assistant" else "👤"
         with st.chat_message(msg["role"], avatar=avatar):
+            if msg.get("image"):
+                st.markdown(f'<img src="data:image/jpeg;base64,{msg["image"]}" style="max-width: 300px; border-radius: 10px; margin-bottom: 10px;">', unsafe_allow_html=True)
             st.write(msg["content"])
             if msg["role"] == "assistant":
                 st.download_button("Download", data=msg["content"], file_name="solution.md",
@@ -1200,6 +1209,8 @@ elif st.session_state.active_session_id:
     for msg in load_messages(st.session_state.active_session_id):
         avatar = SPARKLE_AVATAR if msg["role"] == "assistant" else "👤"
         with st.chat_message(msg["role"], avatar=avatar):
+            if msg.get("image_base64"):
+                st.markdown(f'<img src="data:image/jpeg;base64,{msg["image_base64"]}" style="max-width: 300px; border-radius: 10px; margin-bottom: 10px;">', unsafe_allow_html=True)
             st.write(msg["content"])
             if msg["role"] == "assistant":
                 st.download_button("Download", data=msg["content"], file_name="solution.md",
@@ -1254,9 +1265,9 @@ if "suggested_prompt" in st.session_state:
 if input_text:
     prompt = input_text
     if is_guest:
-        st.session_state.guest_messages.append({"role": "user", "content": prompt})
+        st.session_state.guest_messages.append({"role": "user", "content": prompt, "image": img_base64})
     elif st.session_state.active_session_id:
-        save_message(st.session_state.active_session_id, "user", prompt)
+        save_message(st.session_state.active_session_id, "user", prompt, img_base64)
 
         prior = load_messages(st.session_state.active_session_id)
         if len(prior) == 1:
