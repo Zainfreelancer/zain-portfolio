@@ -744,21 +744,23 @@ def list_files() -> str:
 # --- IMAGE GENERATION TOOL ---
 @tool
 def generate_image(prompt: str) -> str:
-    """Generate an image based on a text prompt using Hugging Face."""
-    if not HUGGINGFACE_KEY:
-        return "Image generation unavailable. (Missing HUGGINGFACE_API_KEY)."
-     
-    API_URL = "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0"
-    headers = {"Authorization": f"Bearer {HUGGINGFACE_KEY}"}
+    """Generate an image based on a text prompt using Pollinations AI (free)."""
+    # Pollinations requires no API key for basic usage
+    # We use their Flux model which is free
+    import urllib.parse
+    
+    encoded_prompt = urllib.parse.quote(prompt)
+    image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1024&height=1024&nologo=true"
     
     try:
-        response = requests.post(API_URL, headers=headers, json={"inputs": prompt}, timeout=30)
-        
+        # Verify the URL is reachable (optional, but helps catch errors)
+        response = requests.head(image_url, timeout=10)
         if response.status_code == 200:
-            img_b64 = base64.b64encode(response.content).decode()
-            return f"![Generated Image](data:image/png;base64,{img_b64})"
+            # Return the URL directly. Streamlit's st.image can display URLs.
+            # But since you're using st.markdown, we wrap it in Markdown image syntax.
+            return f"![Generated Image]({image_url})"
         else:
-            return f"Image generation failed. API returned: {response.text}"
+            return f"Image generation failed. Status: {response.status_code}"
     except Exception as e:
         return f"Image generation error: {e}"
 
@@ -1220,7 +1222,8 @@ if "direct_image_prompt" in st.session_state:
         with st.spinner("Generating image... (takes 3-5 seconds)"):
             # Call the tool function directly with a dictionary
             img_markdown = generate_image.invoke({"prompt": img_prompt}) 
-            st.markdown(img_markdown, unsafe_allow_html=True)
+            # Since Pollinations returns a markdown image tag, st.markdown works perfectly
+            st.markdown(img_markdown)
             
     if not is_guest and st.session_state.active_session_id:
         save_message(st.session_state.active_session_id, "assistant", f"[Generated Image: {img_prompt}]")
